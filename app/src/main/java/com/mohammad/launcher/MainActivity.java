@@ -46,12 +46,22 @@ public class MainActivity extends Activity {
 
         LinearLayout head = new LinearLayout(this);
         head.setGravity(Gravity.CENTER_VERTICAL);
-        TextClock clock = new TextClock(this);
-        clock.setFormat12Hour("hh:mm a");
-        clock.setFormat24Hour("HH:mm");
-        clock.setTextSize(44);
-        clock.setTextColor(0xFFF4EFE6);
-        head.addView(clock, new LinearLayout.LayoutParams(0, -2, 1));
+       // تنسيق الساعة بنظام 12 مع صباحاً ومساءً
+clock.setFormat12Hour("hh:mm a");
+clock.setFormat24Hour("hh:mm a");
+clock.setTextSize(40");
+
+// إضافة التاريخ تحته
+android.widget.TextView dateView = new android.widget.TextView(this);
+dateView.setTextSize(18);
+dateView.setTextColor(0xFFFFFFFF);
+dateView.setGravity(android.view.Gravity.CENTER);
+
+java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("EEEE، d MMMM yyyy", java.util.Locale.getDefault());
+dateView.setText(sdf.format(new java.util.Date()));
+
+head.addView(dateView);
+ 
 
         TextView wifi = new TextView(this);
         wifi.setText("📶  الواي فاي");
