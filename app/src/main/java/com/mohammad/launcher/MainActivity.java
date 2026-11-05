@@ -72,6 +72,23 @@ public class MainActivity extends Activity {
         grid.setPadding(0, dp(20), 0, 0);
         sv.addView(grid);
         root.addView(sv, new LinearLayout.LayoutParams(-1, 0, 1));
+        
+android.widget.SeekBar brightnessBar = new android.widget.SeekBar(this);
+brightnessBar.setMax(100);
+root.addView(brightnessBar);
+
+brightnessBar.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+    @Override
+    public void onProgressChanged(android.widget.SeekBar seekBar, int progress, boolean fromUser) {
+        float brightness = progress / 100.0f;
+        android.view.WindowManager.LayoutParams layoutParams = getWindow().getAttributes();
+        layoutParams.screenBrightness = brightness;
+        getWindow().setAttributes(layoutParams);
+    }
+    @Override
+    public void onStartTrackingTouch(android.widget.SeekBar seekBar) {}
+    @Override
+    public void onStopTrackingTouch(android.widget.SeekBar seekBar) {}
         setContentView(root);
     }
 
