@@ -2,256 +2,213 @@ package com.mohammad.launcher;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.RectF;
 import android.graphics.drawable.GradientDrawable;
+import android.media.tv.TvContract;
+import android.media.tv.TvInputInfo;
+import android.media.tv.TvInputManager;
+import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
+import android.view.WindowManager;
+import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
-import android.widget.TextClock;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 public class MainActivity extends Activity {
-    static final int COUNT = 10;
+    static final int REQ_IMG = 101;
+    static final int ACCENT = 0xFFE9A23B;
+    static final int[][] PD = {
+        {0xFF0F2A33, 0xFF1D4B52}, {0xFF1B1035, 0xFF3B2A6B}, {0xFF2A1210, 0xFF5C2A1E},
+        {0xFF0E1E14, 0xFF22513A}, {0xFF121212, 0xFF2B2B2B}};
+    static final int[][] PL = {
+        {0xFFE9F3F5, 0xFFB9D8DE}, {0xFFEFE9F8, 0xFFCFC2EC}, {0xFFF8EDE6, 0xFFEBC2AE},
+        {0xFFE8F4EC, 0xFFB7DEC5}, {0xFFF5F5F5, 0xFFDADADA}};
+    static final String[] PN = {"أزرق بحري", "بنفسجي ليلي", "ترابي دافئ", "أخضر غامق", "رمادي فحمي"};
+
+    interface OnPick { void on(String pkg); }
+
+    /** أيقونات مرسومة بالكود: 0 واي فاي، 1 سطوع، 2 مصدر HDMI، 3 إعدادات */
+    static class IconBtn extends View {
+        final int type;
+        final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        int color = ACCENT;
+
+        IconBtn(Context c, int type) {
+            super(c);
+            this.type = type;
+            setFocusable(true);
+            setClickable(true);
+            p.setStrokeCap(Paint.Cap.ROUND);
+            p.setStrokeJoin(Paint.Join.ROUND);
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            float w = getWidth(), h = getHeight();
+            float s = Math.min(w, h);
+            float cx = w / 2f, cy = h / 2f;
+            p.setColor(color);
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(s * 0.07f);
+            if (type == 0) {
+                float bx = cx, by = cy + s * 0.2f;
+                for (int k = 1; k <= 3; k++) {
+                    float r = s * 0.13f * k;
+                    RectF rf = new RectF(bx - r, by - r, bx + r, by + r);
+                    c.drawArc(rf, 225, 90, false, p);
+                }
+                p.setStyle(Paint.Style.FILL);
+                c.drawCircle(bx, by, s * 0.05f, p);
+            } else if (type == 1) {
+                c.drawCircle(cx, cy, s * 0.15f, p);
+                for (int k = 0; k < 8; k++) {
+                    double a = Math.toRadians(k * 45);
+                    float x1 = cx + (float) Math.cos(a) * s * 0.24f;
+                    float y1 = cy + (float) Math.sin(a) * s * 0.24f;
+                    float x2 = cx + (float) Math.cos(a) * s * 0.34f;
+                    float y2 = cy + (float) Math.sin(a) * s * 0.34f;
+                    c.drawLine(x1, y1, x2, y2, p);
+                }
+            } else if (type == 2) {
+                Path path = new Path();
+                path.moveTo(cx - 0.3f * s, cy - 0.18f * s);
+                path.lineTo(cx + 0.3f * s, cy - 0.18f * s);
+                path.lineTo(cx + 0.3f * s, cy + 0.04f * s);
+                path.lineTo(cx + 0.2f * s, cy + 0.18f * s);
+                path.lineTo(cx - 0.2f * s, cy + 0.18f * s);
+                path.lineTo(cx - 0.3f * s, cy + 0.04f * s);
+                path.close();
+                c.drawPath(path, p);
+                c.drawLine(cx - 0.14f * s, cy - 0.04f * s, cx + 0.14f * s, cy - 0.04f * s, p);
+            } else {
+                c.drawCircle(cx, cy, s * 0.14f, p);
+                for (int k = 0; k < 8; k++) {
+                    double a = Math.toRadians(k * 45);
+                    float x1 = cx + (float) Math.cos(a) * s * 0.22f;
+                    float y1 = cy + (float) Math.sin(a) * s * 0.22f;
+                    float x2 = cx + (float) Math.cos(a) * s * 0.32f;
+                    float y2 = cy + (float) Math.sin(a) * s * 0.32f;
+                    c.drawLine(x1, y1, x2, y2, p);
+                }
+            }
+        }
+    }
+
     SharedPreferences sp;
-    LinearLayout grid;
     float d;
+    boolean dark;
+    ImageView bgView;
+    View overlay, dimView;
+    TextView clockTv, dateTv, weatherTv;
+    LinearLayout midRow, bottomRow;
+    String loadedKey = null;
+    final List<View> glass = new ArrayList<>();
+    Handler h = new Handler(Looper.getMainLooper());
+    Runnable ticker = new Runnable() {
+        @Override
+        public void run() {
+            tick();
+            h.postDelayed(this, 20000);
+        }
+    };
 
     int dp(int v) { return (int) (v * d + 0.5f); }
+    int textColor() { return dark ? 0xFFF4EFE6 : 0xFF14262C; }
+    int focusColor() { return dark ? 0xFFFFFFFF : 0xFF14262C; }
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         sp = getSharedPreferences("launcher", MODE_PRIVATE);
         d = getResources().getDisplayMetrics().density;
+        dark = sp.getBoolean("dark", true);
+
+        FrameLayout frame = new FrameLayout(this);
+        bgView = new ImageView(this);
+        bgView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        frame.addView(bgView, new FrameLayout.LayoutParams(-1, -1));
+        overlay = new View(this);
+        frame.addView(overlay, new FrameLayout.LayoutParams(-1, -1));
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
-        root.setPadding(dp(24), dp(20), dp(24), dp(20));
-        root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[]{0xFF0F2A33, 0xFF1D4B52}));
+        root.setPadding(dp(28), dp(18), dp(28), dp(18));
+        frame.addView(root, new FrameLayout.LayoutParams(-1, -1));
 
         LinearLayout head = new LinearLayout(this);
         head.setGravity(Gravity.CENTER_VERTICAL);
-       // تنسيق الساعة بنظام 12 مع صباحاً ومساءً
-clock.setFormat12Hour("hh:mm a");
-clock.setFormat24Hour("hh:mm a");
-clock.setTextSize(40");
 
-// إضافة التاريخ تحته
-android.widget.TextView dateView = new android.widget.TextView(this);
-dateView.setTextSize(18);
-dateView.setTextColor(0xFFFFFFFF);
-dateView.setGravity(android.view.Gravity.CENTER);
+        LinearLayout timeCard = card();
+        clockTv = new TextView(this);
+        clockTv.setTextSize(40);
+        clockTv.setGravity(Gravity.CENTER);
+        dateTv = new TextView(this);
+        dateTv.setTextSize(16);
+        dateTv.setGravity(Gravity.CENTER);
+        dateTv.setAlpha(0.85f);
+        timeCard.addView(clockTv);
+        timeCard.addView(dateTv);
+        head.addView(timeCard);
 
-java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("EEEE، d MMMM yyyy", java.util.Locale.getDefault());
-dateView.setText(sdf.format(new java.util.Date()));
+        LinearLayout weatherCard = card();
+        weatherCard.setFocusable(true);
+        weatherCard.setClickable(true);
+        weatherCard.setOnClickListener(v -> askCity());
+        weatherCard.setOnFocusChangeListener((v, f) -> glassBg(v, f));
+        weatherTv = new TextView(this);
+        weatherTv.setTextSize(26);
+        weatherTv.setGravity(Gravity.CENTER);
+        weatherCard.addView(weatherTv);
+        LinearLayout.LayoutParams wcl = new LinearLayout.LayoutParams(-2, -1);
+        wcl.setMarginStart(dp(14));
+        head.addView(weatherCard, wcl);
 
-head.addView(dateView);
- 
+        head.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
 
-        TextView wifi = new TextView(this);
-        wifi.setText("📶  الواي فاي");
-        wifi.setTextSize(24);
-        wifi.setTextColor(0xFF2A1A00);
-        wifi.setPadding(dp(26), dp(16), dp(26), dp(16));
-        wifi.setFocusable(true);
-        wifi.setClickable(true);
-        bg(wifi, false, 0xFFE9A23B, 0xFFE9A23B, 0xFFFFFFFF);
-        wifi.setOnFocusChangeListener((v, f) -> bg(wifi, f, 0xFFE9A23B, 0xFFE9A23B, 0xFFFFFFFF));
-        wifi.setOnClickListener(v -> openWifi());
-        head.addView(wifi);
-        root.addView(head);
+        head.addView(iconBtn(0, v -> openWifi()), iconLp());
+        head.addView(iconBtn(1, v -> brightnessDialog()), iconLp());
+        head.addView(iconBtn(2, v -> openSource()), iconLp());
+        head.addView(iconBtn(3, v -> openSettings()), iconLp());
+        root.addView(head, new LinearLayout.LayoutParams(-1, dp(92)));
 
-        ScrollView sv = new ScrollView(this);
-        grid = new LinearLayout(this);
-        grid.setOrientation(LinearLayout.VERTICAL);
-        grid.setPadding(0, dp(20), 0, 0);
-        sv.addView(grid);
-        root.addView(sv, new LinearLayout.LayoutParams(-1, 0, 1));
-        
-android.widget.SeekBar brightnessBar = new android.widget.SeekBar(this);
-brightnessBar.setMax(100);
-root.addView(brightnessBar);
-
-brightnessBar.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
-    @Override
-    public void onProgressChanged(android.widget.SeekBar seekBar, int progress, boolean fromUser) {
-        float brightness = progress / 100.0f;
-        android.view.WindowManager.LayoutParams layoutParams = getWindow().getAttributes();
-        layoutParams.screenBrightness = brightness;
-        getWindow().setAttributes(layoutParams);
-    }
-    @Override
-    public void onStartTrackingTouch(android.widget.SeekBar seekBar) {}
-    @Override
-    public void onStopTrackingTouch(android.widget.SeekBar seekBar) {}
-        setContentView(root);
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        build();
-    }
-
-    @Override
-    public void onBackPressed() { }
-
-    void openWifi() {
-        try {
-            startActivity(new Intent(Settings.ACTION_WIFI_SETTINGS));
-        } catch (Exception e) {
-            try {
-                startActivity(new Intent(Settings.ACTION_SETTINGS));
-            } catch (Exception e2) {
-                Toast.makeText(this, "تعذر فتح الإعدادات", Toast.LENGTH_SHORT).show();
-            }
-        }
-    }
-
-    void bg(View v, boolean focused, int fill, int stroke, int focusStroke) {
-        GradientDrawable g = new GradientDrawable();
-        g.setColor(fill);
-        g.setCornerRadius(dp(24));
-        g.setStroke(dp(focused ? 4 : 1), focused ? focusStroke : stroke);
-        v.setBackground(g);
-    }
-
-    LinearLayout.LayoutParams cellLp() {
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(150), 1);
-        p.setMargins(dp(8), dp(8), dp(8), dp(8));
-        return p;
-    }
-
-    void build() {
-        grid.removeAllViews();
-        int wDp = (int) (getResources().getDisplayMetrics().widthPixels / d) - 48;
-        int cols = Math.max(2, wDp / 170);
-        LinearLayout row = null;
-        for (int i = 0; i < COUNT; i++) {
-            if (i % cols == 0) {
-                row = new LinearLayout(this);
-                grid.addView(row, new LinearLayout.LayoutParams(-1, -2));
-            }
-            row.addView(tile(i), cellLp());
-        }
-        for (int j = COUNT; j % cols != 0; j++) {
-            row.addView(new View(this), cellLp());
-        }
-    }
-
-    View tile(final int i) {
-        final String pkg = sp.getString("s" + i, null);
-        final LinearLayout t = new LinearLayout(this);
-        t.setOrientation(LinearLayout.VERTICAL);
-        t.setGravity(Gravity.CENTER);
-        t.setFocusable(true);
-        t.setClickable(true);
-
-        PackageManager pm = getPackageManager();
-        boolean filled = false;
-        if (pkg != null) {
-            try {
-                ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
-                ImageView iv = new ImageView(this);
-                iv.setImageDrawable(pm.getApplicationIcon(ai));
-                t.addView(iv, new LinearLayout.LayoutParams(dp(64), dp(64)));
-                TextView name = new TextView(this);
-                name.setText(pm.getApplicationLabel(ai));
-                name.setTextSize(18);
-                name.setTextColor(0xFFF4EFE6);
-                name.setGravity(Gravity.CENTER);
-                name.setMaxLines(1);
-                name.setPadding(dp(6), dp(8), dp(6), 0);
-                t.addView(name);
-                filled = true;
-            } catch (PackageManager.NameNotFoundException e) {
-                filled = false;
-            }
-        }
-        final boolean isFilled = filled;
-        if (!filled) {
-            TextView plus = new TextView(this);
-            plus.setText("＋");
-            plus.setTextSize(40);
-            plus.setTextColor(0xCCF4EFE6);
-            plus.setGravity(Gravity.CENTER);
-            t.addView(plus);
-            TextView lbl = new TextView(this);
-            lbl.setText("أضف تطبيقاً");
-            lbl.setTextSize(16);
-            lbl.setTextColor(0xAAF4EFE6);
-            lbl.setGravity(Gravity.CENTER);
-            t.addView(lbl);
-        }
-        final int fill = filled ? 0x24FFFFFF : 0x0FFFFFFF;
-        final int stroke = filled ? 0x40FFFFFF : 0x60FFFFFF;
-        bg(t, false, fill, stroke, 0xFFFFFFFF);
-        t.setOnFocusChangeListener((v, f) -> bg(t, f, f ? 0x44FFFFFF : fill, stroke, 0xFFFFFFFF));
-        t.setOnClickListener(v -> {
-            if (isFilled) launch(pkg); else pick(i);
-        });
-        t.setOnLongClickListener(v -> {
-            if (isFilled) options(i);
-            return true;
-        });
-        return t;
-    }
-
-    void launch(String pkg) {
-        Intent li = getPackageManager().getLaunchIntentForPackage(pkg);
-        if (li == null) {
-            Toast.makeText(this, "التطبيق غير متاح", Toast.LENGTH_SHORT).show();
-        } else {
-            startActivity(li);
-        }
-    }
-
-    void options(final int i) {
-        new AlertDialog.Builder(this)
-                .setItems(new String[]{"تغيير التطبيق", "حذف من الخانة"}, (dlg, which) -> {
-                    if (which == 0) {
-                        pick(i);
-                    } else {
-                        sp.edit().remove("s" + i).apply();
-                        build();
-                    }
-                }).show();
-    }
-
-    void pick(final int i) {
-        PackageManager pm = getPackageManager();
-        Intent mi = new Intent(Intent.ACTION_MAIN);
-        mi.addCategory(Intent.CATEGORY_LAUNCHER);
-        List<ResolveInfo> found = pm.queryIntentActivities(mi, 0);
-        final List<String[]> items = new ArrayList<>();
-        for (ResolveInfo r : found) {
-            String p = r.activityInfo.packageName;
-            if (p.equals(getPackageName())) continue;
-            items.add(new String[]{r.loadLabel(pm).toString(), p});
-        }
-        Collections.sort(items, (a, c) -> a[0].compareToIgnoreCase(c[0]));
-        String[] labels = new String[items.size()];
-        for (int k = 0; k < labels.length; k++) labels[k] = items.get(k)[0];
-        new AlertDialog.Builder(this)
-                .setTitle("اختر تطبيقاً")
-                .setItems(labels, (dlg, which) -> {
-                    sp.edit().putString("s" + i, items.get(which)[1]).apply();
-                    build();
-                }).show();
-    }
-}
+        midRow = new LinearLayout(this);
+        midRow.setPadding(0, dp(10), 0, 0);
+        root.addView(midRo
