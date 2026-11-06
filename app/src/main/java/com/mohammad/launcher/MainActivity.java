@@ -20,6 +20,7 @@ import android.media.tv.TvContract;
 import android.media.tv.TvInputInfo;
 import android.media.tv.TvInputManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -229,7 +230,7 @@ public class MainActivity extends Activity {
         applyLook();
         build();
         tick();
-        applyBrightness(sp.getInt("bright", 100));
+        if (sp.contains("bright")) applyBrightness(sp.getInt("bright", 100));
         h.removeCallbacks(ticker);
         h.postDelayed(ticker, 20000);
         refreshWeather(false);
@@ -358,19 +359,77 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    boolean canWriteSystem() {
+        return Build.VERSION.SDK_INT < 23 || Settings.System.canWrite(this);
+    }
+
     void applyBrightness(int lvl) {
         if (lvl < 10) lvl = 10;
         if (lvl > 100) lvl = 100;
+        boolean sysOk = false;
+        if (canWriteSystem()) {
+            try {
+                Settings.System.putInt(getContentResolver(), Settings.System.SCREEN_BRIGHTNESS_MODE,
+                        Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL);
+                Settings.System.putInt(getContentResolver(), Settings.System.SCREEN_BRIGHTNESS,
+                        Math.round(lvl * 255f / 100f));
+                sysOk = true;
+            } catch (Exception ignored) { }
+        }
         WindowManager.LayoutParams lp = getWindow().getAttributes();
-        lp.screenBrightness = lvl >= 100
-                ? WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-                : Math.max(0.05f, lvl / 100f);
+        float dim = 0f;
+        if (sysOk) {
+            lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+        } else {
+            lp.screenBrightness = lvl >= 100
+                    ? WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                    : Math.max(0.05f, lvl / 100f);
+            dim = (100 - lvl) / 90f * 0.55f;
+        }
         getWindow().setAttributes(lp);
-        float dim = (100 - lvl) / 90f * 0.55f;
         dimView.setBackgroundColor(Color.argb((int) (dim * 255), 0, 0, 0));
     }
 
     void brightnessDialog() {
+        if (!canWriteSystem() && !sp.getBoolean("perm_skip", false)) {
+            new AlertDialog.Builder(this)
+                    .setTitle("سطوع كل التطبيقات")
+                    .setMessage("ليعمل السطوع داخل كل التطبيقات اسمح لواجهتي بتعديل إعدادات النظام. بدونه يعمل السطوع داخل الواجهة فقط.")
+                    .setPositiveButton("فتح الإعدادات", (dlg, w) -> allowWriteSettings())
+                    .setNegativeButton("لاحقاً", (dlg, w) -> {
+                        sp.edit().putBoolean("perm_skip", true).apply();
+                        showBrightnessSlider();
+                    })
+                    .show();
+            return;
+        }
+        showBrightnessSlider();
+    }
+
+    void allowWriteSettings() {
+        sp.edit().remove("perm_skip").apply();
+        try {
+            startActivity(new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                    Uri.parse("package:" + getPackageName())));
+        } catch (Exception e) {
+            sp.edit().putBoolean("perm_skip", true).apply();
+            Toast.makeText(this, "الشاشة لا تدعم هذا الإذن، يعمل السطوع داخل الواجهة فقط", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    void openHomeSettings() {
+        try {
+            startActivity(new Intent(Settings.ACTION_HOME_SETTINGS));
+        } catch (Exception e) {
+            try {
+                startActivity(new Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS));
+            } catch (Exception e2) {
+                Toast.makeText(this, "افتح الإعدادات ثم التطبيقات ثم التطبيقات الافتراضية ثم الشاشة الرئيسية", Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    void showBrightnessSlider() {
         int cur = sp.getInt("bright", 100);
         final TextView tv = new TextView(this);
         tv.setTextSize(20);
@@ -511,7 +570,9 @@ public class MainActivity extends Activity {
             "🎨  تغيير الخلفية",
             dark ? "☀️  الوضع الفاتح" : "🌙  الوضع الداكن",
             "📍  مدينة الطقس",
-            "🔄  تحديث الطقس"};
+            "🔄  تحديث الطقس",
+            "🏠  تعيين كواجهة افتراضية",
+            "💡  السماح بتعديل سطوع النظام"};
         new AlertDialog.Builder(this)
                 .setTitle("الإعدادات")
                 .setItems(items, (dlg, which) -> {
@@ -524,8 +585,12 @@ public class MainActivity extends Activity {
                         build();
                     } else if (which == 2) {
                         askCity();
-                    } else {
+                    } else if (which == 3) {
                         refreshWeather(true);
+                    } else if (which == 4) {
+                        openHomeSettings();
+                    } else {
+                        allowWriteSettings();
                     }
                 }).show();
     }
@@ -776,4 +841,3 @@ public class MainActivity extends Activity {
                 .show();
     }
 }
-
