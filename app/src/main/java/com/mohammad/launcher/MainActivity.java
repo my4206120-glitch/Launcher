@@ -12,9 +12,11 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.media.tv.TvContract;
 import android.media.tv.TvInputInfo;
@@ -25,8 +27,11 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.util.DisplayMetrics;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewOutlineProvider;
 import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -54,7 +59,6 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
     static final int REQ_IMG = 101;
-    static final int ACCENT = 0xFFE9A23B;
     static final int[][] PD = {
         {0xFF0F2A33, 0xFF1D4B52}, {0xFF1B1035, 0xFF3B2A6B}, {0xFF2A1210, 0xFF5C2A1E},
         {0xFF0E1E14, 0xFF22513A}, {0xFF121212, 0xFF2B2B2B}};
@@ -65,11 +69,11 @@ public class MainActivity extends Activity {
 
     interface OnPick { void on(String pkg); }
 
-    /** أيقونات مرسومة بالكود: 0 واي فاي، 1 سطوع، 2 مصدر HDMI، 3 إعدادات */
+    /** أيقونات خطية رفيعة: 0 واي فاي، 1 مصدر الإشارة، 2 إعدادات */
     static class IconBtn extends View {
         final int type;
         final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        int color = ACCENT;
+        int color = 0xFFF4EFE6;
 
         IconBtn(Context c, int type) {
             super(c);
@@ -87,46 +91,39 @@ public class MainActivity extends Activity {
             float cx = w / 2f, cy = h / 2f;
             p.setColor(color);
             p.setStyle(Paint.Style.STROKE);
-            p.setStrokeWidth(s * 0.07f);
+            p.setStrokeWidth(s * 0.055f);
             if (type == 0) {
-                float bx = cx, by = cy + s * 0.2f;
+                float by = cy + s * 0.17f;
                 for (int k = 1; k <= 3; k++) {
-                    float r = s * 0.13f * k;
-                    RectF rf = new RectF(bx - r, by - r, bx + r, by + r);
+                    float r = s * 0.115f * k;
+                    RectF rf = new RectF(cx - r, by - r, cx + r, by + r);
                     c.drawArc(rf, 225, 90, false, p);
                 }
                 p.setStyle(Paint.Style.FILL);
-                c.drawCircle(bx, by, s * 0.05f, p);
+                c.drawCircle(cx, by, s * 0.04f, p);
             } else if (type == 1) {
-                c.drawCircle(cx, cy, s * 0.15f, p);
-                for (int k = 0; k < 8; k++) {
-                    double a = Math.toRadians(k * 45);
-                    float x1 = cx + (float) Math.cos(a) * s * 0.24f;
-                    float y1 = cy + (float) Math.sin(a) * s * 0.24f;
-                    float x2 = cx + (float) Math.cos(a) * s * 0.34f;
-                    float y2 = cy + (float) Math.sin(a) * s * 0.34f;
-                    c.drawLine(x1, y1, x2, y2, p);
-                }
-            } else if (type == 2) {
-                Path path = new Path();
-                path.moveTo(cx - 0.3f * s, cy - 0.18f * s);
-                path.lineTo(cx + 0.3f * s, cy - 0.18f * s);
-                path.lineTo(cx + 0.3f * s, cy + 0.04f * s);
-                path.lineTo(cx + 0.2f * s, cy + 0.18f * s);
-                path.lineTo(cx - 0.2f * s, cy + 0.18f * s);
-                path.lineTo(cx - 0.3f * s, cy + 0.04f * s);
-                path.close();
-                c.drawPath(path, p);
-                c.drawLine(cx - 0.14f * s, cy - 0.04f * s, cx + 0.14f * s, cy - 0.04f * s, p);
+                Path box = new Path();
+                box.moveTo(cx + 0.02f * s, cy - 0.26f * s);
+                box.lineTo(cx + 0.27f * s, cy - 0.26f * s);
+                box.lineTo(cx + 0.27f * s, cy + 0.26f * s);
+                box.lineTo(cx + 0.02f * s, cy + 0.26f * s);
+                c.drawPath(box, p);
+                c.drawLine(cx - 0.30f * s, cy, cx + 0.12f * s, cy, p);
+                Path ar = new Path();
+                ar.moveTo(cx - 0.02f * s, cy - 0.13f * s);
+                ar.lineTo(cx + 0.12f * s, cy);
+                ar.lineTo(cx - 0.02f * s, cy + 0.13f * s);
+                c.drawPath(ar, p);
             } else {
-                c.drawCircle(cx, cy, s * 0.14f, p);
-                for (int k = 0; k < 8; k++) {
-                    double a = Math.toRadians(k * 45);
-                    float x1 = cx + (float) Math.cos(a) * s * 0.22f;
-                    float y1 = cy + (float) Math.sin(a) * s * 0.22f;
-                    float x2 = cx + (float) Math.cos(a) * s * 0.32f;
-                    float y2 = cy + (float) Math.sin(a) * s * 0.32f;
-                    c.drawLine(x1, y1, x2, y2, p);
+                float[] ys = {-0.2f, 0f, 0.2f};
+                float[] xs = {0.1f, -0.14f, 0.16f};
+                float r = s * 0.06f;
+                for (int k = 0; k < 3; k++) {
+                    float y = cy + ys[k] * s;
+                    float kx = cx + xs[k] * s;
+                    c.drawLine(cx - 0.3f * s, y, kx - r, y, p);
+                    c.drawLine(kx + r, y, cx + 0.3f * s, y, p);
+                    c.drawCircle(kx, y, r, p);
                 }
             }
         }
@@ -140,6 +137,7 @@ public class MainActivity extends Activity {
     TextView clockTv, dateTv, weatherTv;
     LinearLayout midRow, bottomRow;
     String loadedKey = null;
+    Toast levelToast;
     final List<View> glass = new ArrayList<>();
     Handler h = new Handler(Looper.getMainLooper());
     Runnable ticker = new Runnable() {
@@ -205,16 +203,20 @@ public class MainActivity extends Activity {
         head.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
 
         head.addView(iconBtn(0, v -> openWifi()), iconLp());
-        head.addView(iconBtn(1, v -> brightnessDialog()), iconLp());
-        head.addView(iconBtn(2, v -> openSource()), iconLp());
-        head.addView(iconBtn(3, v -> openSettings()), iconLp());
+        head.addView(iconBtn(1, v -> openSource()), iconLp());
+        head.addView(iconBtn(2, v -> openSettings()), iconLp());
         root.addView(head, new LinearLayout.LayoutParams(-1, dp(92)));
 
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setGravity(Gravity.CENTER);
+        root.addView(body, new LinearLayout.LayoutParams(-1, 0, 1));
         midRow = new LinearLayout(this);
-        midRow.setPadding(0, dp(10), 0, 0);
-        root.addView(midRow, new LinearLayout.LayoutParams(-1, 0, 3));
+        midRow.setGravity(Gravity.CENTER_HORIZONTAL);
         bottomRow = new LinearLayout(this);
-        root.addView(bottomRow, new LinearLayout.LayoutParams(-1, 0, 2));
+        bottomRow.setGravity(Gravity.CENTER_HORIZONTAL);
+        body.addView(midRow, new LinearLayout.LayoutParams(-1, -2));
+        body.addView(bottomRow, new LinearLayout.LayoutParams(-1, -2));
 
         dimView = new View(this);
         dimView.setFocusable(false);
@@ -245,6 +247,26 @@ public class MainActivity extends Activity {
     @Override
     public void onBackPressed() { }
 
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_CHANNEL_UP || keyCode == KeyEvent.KEYCODE_CHANNEL_DOWN) {
+            stepBrightness(keyCode == KeyEvent.KEYCODE_CHANNEL_UP ? 10 : -10);
+            return true;
+        }
+        return super.onKeyDown(keyCode, event);
+    }
+
+    void stepBrightness(int delta) {
+        int lvl = sp.getInt("bright", 100) + delta;
+        if (lvl < 10) lvl = 10;
+        if (lvl > 100) lvl = 100;
+        sp.edit().putInt("bright", lvl).apply();
+        applyBrightness(lvl);
+        if (levelToast != null) levelToast.cancel();
+        levelToast = Toast.makeText(this, "💡 السطوع " + lvl + "%", Toast.LENGTH_SHORT);
+        levelToast.show();
+    }
+
     LinearLayout card() {
         LinearLayout c = new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
@@ -263,12 +285,24 @@ public class MainActivity extends Activity {
     }
 
     LinearLayout.LayoutParams iconLp() {
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(dp(64), dp(64));
-        p.setMarginStart(dp(12));
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(dp(54), dp(54));
+        p.setMarginStart(dp(14));
         return p;
     }
 
     void glassBg(View v, boolean focused) {
+        if (v instanceof IconBtn) {
+            if (focused) {
+                GradientDrawable g = new GradientDrawable();
+                g.setShape(GradientDrawable.OVAL);
+                g.setColor(dark ? 0x33FFFFFF : 0x33000000);
+                g.setStroke(dp(2), focusColor());
+                v.setBackground(g);
+            } else {
+                v.setBackground(null);
+            }
+            return;
+        }
         int fill = dark ? 0x30FFFFFF : 0xB0FFFFFF;
         int stroke = dark ? 0x45FFFFFF : 0x40000000;
         bg(v, focused, focused ? (dark ? 0x4DFFFFFF : 0xE6FFFFFF) : fill, stroke);
@@ -277,7 +311,7 @@ public class MainActivity extends Activity {
     void bg(View v, boolean focused, int fill, int stroke) {
         GradientDrawable g = new GradientDrawable();
         g.setColor(fill);
-        g.setCornerRadius(dp(20));
+        g.setCornerRadius(dp(18));
         g.setStroke(dp(focused ? 4 : 1), focused ? focusColor() : stroke);
         v.setBackground(g);
     }
@@ -294,7 +328,7 @@ public class MainActivity extends Activity {
         for (View v : glass) {
             glassBg(v, v.hasFocus());
             if (v instanceof IconBtn) {
-                ((IconBtn) v).color = dark ? ACCENT : 0xFFB36B00;
+                ((IconBtn) v).color = tc;
                 v.invalidate();
             }
         }
@@ -366,6 +400,14 @@ public class MainActivity extends Activity {
     void applyBrightness(int lvl) {
         if (lvl < 10) lvl = 10;
         if (lvl > 100) lvl = 100;
+        WindowManager.LayoutParams lp = getWindow().getAttributes();
+        if (sp.getBoolean("svc_on", false)) {
+            sp.edit().putInt("bright", lvl).apply();
+            lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+            getWindow().setAttributes(lp);
+            dimView.setBackgroundColor(Color.TRANSPARENT);
+            return;
+        }
         boolean sysOk = false;
         if (canWriteSystem()) {
             try {
@@ -376,7 +418,6 @@ public class MainActivity extends Activity {
                 sysOk = true;
             } catch (Exception ignored) { }
         }
-        WindowManager.LayoutParams lp = getWindow().getAttributes();
         float dim = 0f;
         if (sysOk) {
             lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
@@ -391,7 +432,8 @@ public class MainActivity extends Activity {
     }
 
     void brightnessDialog() {
-        if (!canWriteSystem() && !sp.getBoolean("perm_skip", false)) {
+        if (!canWriteSystem() && !sp.getBoolean("perm_skip", false)
+                && !sp.getBoolean("svc_on", false)) {
             new AlertDialog.Builder(this)
                     .setTitle("سطوع كل التطبيقات")
                     .setMessage("ليعمل السطوع داخل كل التطبيقات اسمح لواجهتي بتعديل إعدادات النظام. بدونه يعمل السطوع داخل الواجهة فقط.")
@@ -413,7 +455,15 @@ public class MainActivity extends Activity {
                     Uri.parse("package:" + getPackageName())));
         } catch (Exception e) {
             sp.edit().putBoolean("perm_skip", true).apply();
-            Toast.makeText(this, "الشاشة لا تدعم هذا الإذن، يعمل السطوع داخل الواجهة فقط", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "الشاشة لا تدعم هذا الإذن", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    void openAccessibility() {
+        try {
+            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+        } catch (Exception e) {
+            Toast.makeText(this, "الشاشة لا تدعم هذه الإعدادات", Toast.LENGTH_LONG).show();
         }
     }
 
@@ -571,8 +621,10 @@ public class MainActivity extends Activity {
             dark ? "☀️  الوضع الفاتح" : "🌙  الوضع الداكن",
             "📍  مدينة الطقس",
             "🔄  تحديث الطقس",
-            "🏠  تعيين كواجهة افتراضية",
-            "💡  السماح بتعديل سطوع النظام"};
+            "💡  السطوع",
+            "🔐  السماح بتعديل سطوع النظام",
+            "⌨️  تفعيل أزرار CH للسطوع",
+            "🏠  تعيين كواجهة افتراضية"};
         new AlertDialog.Builder(this)
                 .setTitle("الإعدادات")
                 .setItems(items, (dlg, which) -> {
@@ -588,9 +640,13 @@ public class MainActivity extends Activity {
                     } else if (which == 3) {
                         refreshWeather(true);
                     } else if (which == 4) {
-                        openHomeSettings();
-                    } else {
+                        brightnessDialog();
+                    } else if (which == 5) {
                         allowWriteSettings();
+                    } else if (which == 6) {
+                        openAccessibility();
+                    } else {
+                        openHomeSettings();
                     }
                 }).show();
     }
@@ -668,7 +724,7 @@ public class MainActivity extends Activity {
             if (tm != null) {
                 for (TvInputInfo info : tm.getTvInputList()) {
                     if (info.isPassthroughInput()) {
-                        labels.add(String.valueOf(info.loadLabel(this)));
+                        labels.add("📺  " + String.valueOf(info.loadLabel(this)));
                         ids.add(info.getId());
                     }
                 }
@@ -680,6 +736,8 @@ public class MainActivity extends Activity {
         }
         labels.add("⚙  اختيار تطبيق المصدر يدوياً");
         ids.add("#pick");
+        labels.add("ℹ️  عرض تفاصيل المداخل (للتشخيص)");
+        ids.add("#diag");
         new AlertDialog.Builder(this)
                 .setTitle("المصدر")
                 .setItems(labels.toArray(new String[0]), (dlg, which) -> {
@@ -691,10 +749,38 @@ public class MainActivity extends Activity {
                         });
                     } else if (id.equals("#pkg")) {
                         launch(sp.getString("src_pkg", ""));
+                    } else if (id.equals("#diag")) {
+                        showInputsInfo();
                     } else {
                         switchInput(id);
                     }
                 }).show();
+    }
+
+    void showInputsInfo() {
+        StringBuilder sb = new StringBuilder();
+        try {
+            TvInputManager tm = (TvInputManager) getSystemService(Context.TV_INPUT_SERVICE);
+            if (tm == null) {
+                sb.append("لا يوجد TvInputManager في هذه الشاشة");
+            } else {
+                List<TvInputInfo> list = tm.getTvInputList();
+                sb.append("عدد المداخل: ").append(list.size()).append("\n\n");
+                for (TvInputInfo info : list) {
+                    sb.append(String.valueOf(info.loadLabel(this)))
+                            .append("\nنوع: ").append(info.getType())
+                            .append(" | مباشر: ").append(info.isPassthroughInput())
+                            .append("\n").append(info.getId()).append("\n\n");
+                }
+            }
+        } catch (Exception e) {
+            sb.append("خطأ: ").append(e.toString());
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("مداخل الشاشة")
+                .setMessage(sb.toString())
+                .setPositiveButton("إغلاق", null)
+                .show();
     }
 
     void switchInput(String id) {
@@ -706,36 +792,53 @@ public class MainActivity extends Activity {
         }
     }
 
-    LinearLayout.LayoutParams cellLp(float w) {
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, -1, w);
-        p.setMargins(dp(6), dp(6), dp(6), dp(6));
+    LinearLayout.LayoutParams cellLp(int w, int hh, int m) {
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(w, hh);
+        p.setMargins(m, m, m, m);
         return p;
     }
 
     void build() {
         midRow.removeAllViews();
         bottomRow.removeAllViews();
-        midRow.addView(tile(0, true), cellLp(1.2f));
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        int m = dp(6);
+        int cw = dm.widthPixels - dp(56);
+        int availH = dm.heightPixels - dp(36) - dp(92) - dp(10);
+        float ratio = 1.6f;
+        int wS = (cw - 8 * m) / 4;
+        int hS = (int) (wS / ratio);
+        int wB = (cw - 10 * m) / 5;
+        int hB = (int) (wB / ratio);
+        if (2 * hS + hB + 6 * m > availH) {
+            float f = (float) (availH - 6 * m) / (2 * hS + hB);
+            wS = (int) (wS * f);
+            hS = (int) (hS * f);
+            wB = (int) (wB * f);
+            hB = (int) (hB * f);
+        }
+        int wBig = 2 * wS + 2 * m;
+        int hBig = 2 * hS + 2 * m;
+
+        midRow.addView(tile(0, true, wBig, hBig), cellLp(wBig, hBig, m));
         LinearLayout grid = new LinearLayout(this);
         grid.setOrientation(LinearLayout.VERTICAL);
         for (int r = 0; r < 2; r++) {
             LinearLayout row = new LinearLayout(this);
             for (int c = 0; c < 2; c++) {
-                row.addView(tile(1 + r * 2 + c, false), cellLp(1f));
+                row.addView(tile(1 + r * 2 + c, false, wS, hS), cellLp(wS, hS, m));
             }
-            grid.addView(row, new LinearLayout.LayoutParams(-1, 0, 1));
+            grid.addView(row, new LinearLayout.LayoutParams(-2, -2));
         }
-        midRow.addView(grid, new LinearLayout.LayoutParams(0, -1, 1.6f));
+        midRow.addView(grid, new LinearLayout.LayoutParams(-2, -2));
         for (int i = 5; i < 10; i++) {
-            bottomRow.addView(tile(i, false), cellLp(1f));
+            bottomRow.addView(tile(i, false, wB, hB), cellLp(wB, hB, m));
         }
     }
 
-    View tile(final int i, boolean big) {
+    View tile(final int i, boolean big, int w, int hh) {
         final String pkg = sp.getString("s" + i, null);
-        final LinearLayout t = new LinearLayout(this);
-        t.setOrientation(LinearLayout.VERTICAL);
-        t.setGravity(Gravity.CENTER);
+        final FrameLayout t = new FrameLayout(this);
         t.setFocusable(true);
         t.setClickable(true);
 
@@ -744,18 +847,43 @@ public class MainActivity extends Activity {
         if (pkg != null) {
             try {
                 ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
-                ImageView iv = new ImageView(this);
-                iv.setImageDrawable(pm.getApplicationIcon(ai));
-                int s = dp(big ? 110 : 60);
-                t.addView(iv, new LinearLayout.LayoutParams(s, s));
-                TextView name = new TextView(this);
-                name.setText(pm.getApplicationLabel(ai));
-                name.setTextSize(big ? 26 : 17);
-                name.setTextColor(textColor());
-                name.setGravity(Gravity.CENTER);
-                name.setMaxLines(1);
-                name.setPadding(dp(6), dp(8), dp(6), 0);
-                t.addView(name);
+                Drawable banner = null;
+                try {
+                    Intent li = pm.getLeanbackLaunchIntentForPackage(pkg);
+                    if (li == null) li = pm.getLaunchIntentForPackage(pkg);
+                    if (li != null) banner = pm.getActivityBanner(li);
+                } catch (Exception ignored) { }
+                if (banner == null) banner = pm.getApplicationBanner(ai);
+                if (banner != null) {
+                    ImageView iv = new ImageView(this);
+                    iv.setImageDrawable(banner);
+                    iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                    iv.setClipToOutline(true);
+                    iv.setOutlineProvider(new ViewOutlineProvider() {
+                        @Override
+                        public void getOutline(View v, Outline o) {
+                            o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), dp(18));
+                        }
+                    });
+                    t.addView(iv, new FrameLayout.LayoutParams(-1, -1));
+                } else {
+                    LinearLayout box = new LinearLayout(this);
+                    box.setOrientation(LinearLayout.VERTICAL);
+                    box.setGravity(Gravity.CENTER);
+                    ImageView iv = new ImageView(this);
+                    iv.setImageDrawable(pm.getApplicationIcon(ai));
+                    int s = (int) (hh * (big ? 0.5f : 0.46f));
+                    box.addView(iv, new LinearLayout.LayoutParams(s, s));
+                    TextView name = new TextView(this);
+                    name.setText(pm.getApplicationLabel(ai));
+                    name.setTextSize(big ? 22 : 15);
+                    name.setTextColor(textColor());
+                    name.setGravity(Gravity.CENTER);
+                    name.setMaxLines(1);
+                    name.setPadding(dp(6), dp(6), dp(6), 0);
+                    box.addView(name);
+                    t.addView(box, new FrameLayout.LayoutParams(-1, -1));
+                }
                 filled = true;
             } catch (PackageManager.NameNotFoundException e) {
                 filled = false;
@@ -763,32 +891,50 @@ public class MainActivity extends Activity {
         }
         final boolean isFilled = filled;
         if (!filled) {
+            LinearLayout box = new LinearLayout(this);
+            box.setOrientation(LinearLayout.VERTICAL);
+            box.setGravity(Gravity.CENTER);
             TextView plus = new TextView(this);
             plus.setText("＋");
-            plus.setTextSize(big ? 56 : 38);
+            plus.setTextSize(big ? 52 : 34);
             plus.setTextColor(textColor());
             plus.setAlpha(0.7f);
             plus.setGravity(Gravity.CENTER);
-            t.addView(plus);
+            box.addView(plus);
             TextView lbl = new TextView(this);
             lbl.setText("أضف تطبيقاً");
-            lbl.setTextSize(big ? 22 : 15);
+            lbl.setTextSize(big ? 20 : 14);
             lbl.setTextColor(textColor());
             lbl.setAlpha(0.6f);
             lbl.setGravity(Gravity.CENTER);
-            t.addView(lbl);
+            box.addView(lbl);
+            t.addView(box, new FrameLayout.LayoutParams(-1, -1));
         }
-        final int fill = dark ? (filled ? 0x2EFFFFFF : 0x12FFFFFF) : (filled ? 0x99FFFFFF : 0x44FFFFFF);
-        final int focusFill = dark ? 0x44FFFFFF : 0xCCFFFFFF;
-        final int stroke = dark ? 0x40FFFFFF : 0x40000000;
+
+        int fill = dark ? (filled ? 0x2EFFFFFF : 0x12FFFFFF) : (filled ? 0x99FFFFFF : 0x44FFFFFF);
+        int stroke = dark ? 0x40FFFFFF : 0x40000000;
         bg(t, false, fill, stroke);
-        t.setOnFocusChangeListener((v, f) -> bg(t, f, f ? focusFill : fill, stroke));
+
+        final View ring = new View(this);
+        t.addView(ring, new FrameLayout.LayoutParams(-1, -1));
+        final GradientDrawable ringBg = new GradientDrawable();
+        ringBg.setColor(Color.TRANSPARENT);
+        ringBg.setCornerRadius(dp(18));
+        ringBg.setStroke(dp(4), focusColor());
+        t.setOnFocusChangeListener((v, f) -> {
+            ring.setBackground(f ? ringBg : null);
+            v.animate().scaleX(f ? 1.04f : 1f).scaleY(f ? 1.04f : 1f).setDuration(120).start();
+        });
+
         t.setOnClickListener(v -> {
-            if (isFilled) launch(pkg);
-            else chooseApp("اختر تطبيقاً", p -> {
-                sp.edit().putString("s" + i, p).apply();
-                build();
-            });
+            if (isFilled) {
+                launch(pkg);
+            } else {
+                chooseApp("اختر تطبيقاً", p -> {
+                    sp.edit().putString("s" + i, p).apply();
+                    build();
+                });
+            }
         });
         t.setOnLongClickListener(v -> {
             if (isFilled) options(i);
@@ -798,7 +944,12 @@ public class MainActivity extends Activity {
     }
 
     void launch(String pkg) {
-        Intent li = pkg == null ? null : getPackageManager().getLaunchIntentForPackage(pkg);
+        Intent li = null;
+        if (pkg != null) {
+            PackageManager pm = getPackageManager();
+            li = pm.getLeanbackLaunchIntentForPackage(pkg);
+            if (li == null) li = pm.getLaunchIntentForPackage(pkg);
+        }
         if (li == null) {
             Toast.makeText(this, "التطبيق غير متاح", Toast.LENGTH_SHORT).show();
         } else {
