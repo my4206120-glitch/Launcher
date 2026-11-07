@@ -2,10 +2,14 @@ package com.mohammad.launcher;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Dialog;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
@@ -16,11 +20,14 @@ import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
+import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.media.tv.TvContract;
 import android.media.tv.TvInputInfo;
 import android.media.tv.TvInputManager;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -32,6 +39,7 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewOutlineProvider;
+import android.view.Window;
 import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -69,9 +77,10 @@ public class MainActivity extends Activity {
 
     interface OnPick { void on(String pkg); }
 
-    /** أيقونات خطية رفيعة: 0 واي فاي، 1 مصدر الإشارة، 2 إعدادات */
+    /** أيقونات الشريط العلوي: 0 واي فاي، 1 مصدر الإشارة، 2 إعدادات */
     static class IconBtn extends View {
         final int type;
+        boolean on = true;
         final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         int color = 0xFFF4EFE6;
 
@@ -90,18 +99,22 @@ public class MainActivity extends Activity {
             float s = Math.min(w, h);
             float cx = w / 2f, cy = h / 2f;
             p.setColor(color);
-            p.setStyle(Paint.Style.STROKE);
-            p.setStrokeWidth(s * 0.055f);
             if (type == 0) {
-                float by = cy + s * 0.17f;
-                for (int k = 1; k <= 3; k++) {
-                    float r = s * 0.115f * k;
-                    RectF rf = new RectF(cx - r, by - r, cx + r, by + r);
-                    c.drawArc(rf, 225, 90, false, p);
-                }
+                float r = s * 0.44f;
+                float by = cy + s * 0.2f;
+                RectF rf = new RectF(cx - r, by - r, cx + r, by + r);
                 p.setStyle(Paint.Style.FILL);
-                c.drawCircle(cx, by, s * 0.04f, p);
+                p.setAlpha(on ? 255 : 110);
+                c.drawArc(rf, 225, 90, true, p);
+                if (!on) {
+                    p.setAlpha(255);
+                    p.setStyle(Paint.Style.STROKE);
+                    p.setStrokeWidth(s * 0.07f);
+                    c.drawLine(cx - 0.3f * s, cy - 0.3f * s, cx + 0.3f * s, cy + 0.3f * s, p);
+                }
             } else if (type == 1) {
+                p.setStyle(Paint.Style.STROKE);
+                p.setStrokeWidth(s * 0.07f);
                 Path box = new Path();
                 box.moveTo(cx + 0.02f * s, cy - 0.26f * s);
                 box.lineTo(cx + 0.27f * s, cy - 0.26f * s);
@@ -115,17 +128,141 @@ public class MainActivity extends Activity {
                 ar.lineTo(cx - 0.02f * s, cy + 0.13f * s);
                 c.drawPath(ar, p);
             } else {
-                float[] ys = {-0.2f, 0f, 0.2f};
-                float[] xs = {0.1f, -0.14f, 0.16f};
-                float r = s * 0.06f;
-                for (int k = 0; k < 3; k++) {
-                    float y = cy + ys[k] * s;
-                    float kx = cx + xs[k] * s;
-                    c.drawLine(cx - 0.3f * s, y, kx - r, y, p);
-                    c.drawLine(kx + r, y, cx + 0.3f * s, y, p);
-                    c.drawCircle(kx, y, r, p);
+                p.setStyle(Paint.Style.STROKE);
+                p.setStrokeWidth(s * 0.11f);
+                c.drawCircle(cx, cy, s * 0.17f, p);
+                p.setStrokeWidth(s * 0.1f);
+                for (int k = 0; k < 8; k++) {
+                    double a = Math.toRadians(k * 45);
+                    float x1 = cx + (float) Math.cos(a) * s * 0.27f;
+                    float y1 = cy + (float) Math.sin(a) * s * 0.27f;
+                    float x2 = cx + (float) Math.cos(a) * s * 0.36f;
+                    float y2 = cy + (float) Math.sin(a) * s * 0.36f;
+                    c.drawLine(x1, y1, x2, y2, p);
                 }
             }
+        }
+    }
+
+    /** أيقونة الطقس مرسومة بالكود */
+    static class WIcon extends View {
+        int code = 3;
+        boolean night = false;
+        int cloudColor = 0xFFEAF0F6;
+        final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        WIcon(Context c) {
+            super(c);
+            p.setStrokeCap(Paint.Cap.ROUND);
+        }
+
+        void set(int code, boolean night) {
+            this.code = code;
+            this.night = night;
+            invalidate();
+        }
+
+        static int kind(int c) {
+            if (c == 0) return 0;
+            if (c == 1 || c == 2) return 1;
+            if (c == 3) return 2;
+            if (c == 45 || c == 48) return 3;
+            if ((c >= 51 && c <= 67) || (c >= 80 && c <= 82)) return 4;
+            if ((c >= 71 && c <= 77) || c == 85 || c == 86) return 5;
+            if (c >= 95) return 6;
+            return 2;
+        }
+
+        void cloud(Canvas c, float s, float ox, float oy, float sc) {
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(cloudColor);
+            c.drawCircle((ox + 0.32f * sc) * s, (oy + 0.58f * sc) * s, 0.15f * sc * s, p);
+            c.drawCircle((ox + 0.50f * sc) * s, (oy + 0.46f * sc) * s, 0.20f * sc * s, p);
+            c.drawCircle((ox + 0.70f * sc) * s, (oy + 0.57f * sc) * s, 0.15f * sc * s, p);
+            RectF r = new RectF((ox + 0.18f * sc) * s, (oy + 0.55f * sc) * s,
+                    (ox + 0.84f * sc) * s, (oy + 0.74f * sc) * s);
+            c.drawRoundRect(r, 0.09f * sc * s, 0.09f * sc * s, p);
+        }
+
+        void sun(Canvas c, float s, float cx, float cy, float r) {
+            p.setColor(0xFFFFC845);
+            p.setStyle(Paint.Style.FILL);
+            c.drawCircle(cx * s, cy * s, r * s, p);
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(s * 0.045f);
+            for (int k = 0; k < 8; k++) {
+                double a = Math.toRadians(k * 45);
+                float x1 = (cx + (float) Math.cos(a) * r * 1.45f) * s;
+                float y1 = (cy + (float) Math.sin(a) * r * 1.45f) * s;
+                float x2 = (cx + (float) Math.cos(a) * r * 1.85f) * s;
+                float y2 = (cy + (float) Math.sin(a) * r * 1.85f) * s;
+                c.drawLine(x1, y1, x2, y2, p);
+            }
+        }
+
+        void moon(Canvas c, float s, float cx, float cy, float r) {
+            Path m = new Path();
+            m.addCircle(cx * s, cy * s, r * s, Path.Direction.CCW);
+            Path cut = new Path();
+            cut.addCircle((cx + 0.45f * r) * s, (cy - 0.3f * r) * s, r * 0.85f * s, Path.Direction.CCW);
+            m.op(cut, Path.Op.DIFFERENCE);
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(0xFFE8E4D0);
+            c.drawPath(m, p);
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            float s = Math.min(getWidth(), getHeight());
+            c.save();
+            c.translate((getWidth() - s) / 2f, (getHeight() - s) / 2f);
+            int k = kind(code);
+            if (k == 0) {
+                if (night) moon(c, s, 0.5f, 0.5f, 0.28f);
+                else sun(c, s, 0.5f, 0.5f, 0.2f);
+            } else if (k == 1) {
+                if (night) moon(c, s, 0.36f, 0.36f, 0.2f);
+                else sun(c, s, 0.36f, 0.36f, 0.14f);
+                cloud(c, s, 0.12f, 0.1f, 0.88f);
+            } else if (k == 2) {
+                cloud(c, s, 0f, 0f, 1f);
+            } else if (k == 3) {
+                cloud(c, s, 0f, -0.1f, 1f);
+                p.setStyle(Paint.Style.STROKE);
+                p.setColor(0xFF9FB0C0);
+                p.setStrokeWidth(s * 0.045f);
+                c.drawLine(0.22f * s, 0.78f * s, 0.78f * s, 0.78f * s, p);
+                c.drawLine(0.3f * s, 0.89f * s, 0.7f * s, 0.89f * s, p);
+            } else if (k == 4) {
+                cloud(c, s, 0f, -0.08f, 1f);
+                p.setStyle(Paint.Style.STROKE);
+                p.setColor(0xFF5CB8FF);
+                p.setStrokeWidth(s * 0.05f);
+                c.drawLine(0.38f * s, 0.7f * s, 0.32f * s, 0.86f * s, p);
+                c.drawLine(0.54f * s, 0.7f * s, 0.48f * s, 0.86f * s, p);
+                c.drawLine(0.7f * s, 0.7f * s, 0.64f * s, 0.86f * s, p);
+            } else if (k == 5) {
+                cloud(c, s, 0f, -0.08f, 1f);
+                p.setStyle(Paint.Style.FILL);
+                p.setColor(0xFFFFFFFF);
+                c.drawCircle(0.34f * s, 0.8f * s, 0.04f * s, p);
+                c.drawCircle(0.52f * s, 0.9f * s, 0.04f * s, p);
+                c.drawCircle(0.7f * s, 0.8f * s, 0.04f * s, p);
+            } else {
+                cloud(c, s, 0f, -0.1f, 1f);
+                Path bolt = new Path();
+                bolt.moveTo(0.54f * s, 0.6f * s);
+                bolt.lineTo(0.42f * s, 0.8f * s);
+                bolt.lineTo(0.51f * s, 0.8f * s);
+                bolt.lineTo(0.46f * s, 0.97f * s);
+                bolt.lineTo(0.65f * s, 0.72f * s);
+                bolt.lineTo(0.55f * s, 0.72f * s);
+                bolt.close();
+                p.setStyle(Paint.Style.FILL);
+                p.setColor(0xFFFFD34D);
+                c.drawPath(bolt, p);
+            }
+            c.restore();
         }
     }
 
@@ -135,6 +272,8 @@ public class MainActivity extends Activity {
     ImageView bgView;
     View overlay, dimView;
     TextView clockTv, dateTv, weatherTv;
+    WIcon weatherIcon;
+    IconBtn wifiBtn;
     LinearLayout midRow, bottomRow;
     String loadedKey = null;
     Toast levelToast;
@@ -144,7 +283,7 @@ public class MainActivity extends Activity {
         @Override
         public void run() {
             tick();
-            h.postDelayed(this, 20000);
+            h.postDelayed(this, 10000);
         }
     };
 
@@ -173,39 +312,62 @@ public class MainActivity extends Activity {
         frame.addView(root, new FrameLayout.LayoutParams(-1, -1));
 
         LinearLayout head = new LinearLayout(this);
+        head.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
         head.setGravity(Gravity.CENTER_VERTICAL);
 
-        LinearLayout timeCard = card();
+        LinearLayout timeBox = new LinearLayout(this);
+        timeBox.setOrientation(LinearLayout.VERTICAL);
         clockTv = new TextView(this);
-        clockTv.setTextSize(40);
-        clockTv.setGravity(Gravity.CENTER);
+        clockTv.setTextSize(28);
+        clockTv.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
         dateTv = new TextView(this);
-        dateTv.setTextSize(16);
-        dateTv.setGravity(Gravity.CENTER);
-        dateTv.setAlpha(0.85f);
-        timeCard.addView(clockTv);
-        timeCard.addView(dateTv);
-        head.addView(timeCard);
+        dateTv.setTextSize(13);
+        dateTv.setAlpha(0.7f);
+        timeBox.addView(clockTv);
+        timeBox.addView(dateTv);
+        head.addView(timeBox);
 
-        LinearLayout weatherCard = card();
-        weatherCard.setFocusable(true);
-        weatherCard.setClickable(true);
-        weatherCard.setOnClickListener(v -> askCity());
-        weatherCard.setOnFocusChangeListener((v, f) -> glassBg(v, f));
-        weatherTv = new TextView(this);
-        weatherTv.setTextSize(26);
-        weatherTv.setGravity(Gravity.CENTER);
-        weatherCard.addView(weatherTv);
-        LinearLayout.LayoutParams wcl = new LinearLayout.LayoutParams(-2, -1);
-        wcl.setMarginStart(dp(14));
-        head.addView(weatherCard, wcl);
-
-        head.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
-
-        head.addView(iconBtn(0, v -> openWifi()), iconLp());
-        head.addView(iconBtn(1, v -> openSource()), iconLp());
+        wifiBtn = iconBtn(0, v -> openWifi());
+        head.addView(wifiBtn, iconLp());
         head.addView(iconBtn(2, v -> openSettings()), iconLp());
-        root.addView(head, new LinearLayout.LayoutParams(-1, dp(92)));
+
+        LinearLayout wGroup = new LinearLayout(this);
+        wGroup.setOrientation(LinearLayout.HORIZONTAL);
+        wGroup.setGravity(Gravity.CENTER_VERTICAL);
+        wGroup.setPadding(dp(12), dp(4), dp(14), dp(4));
+        wGroup.setFocusable(true);
+        wGroup.setClickable(true);
+        wGroup.setTag("flat");
+        weatherIcon = new WIcon(this);
+        wGroup.addView(weatherIcon, new LinearLayout.LayoutParams(dp(38), dp(38)));
+        weatherTv = new TextView(this);
+        weatherTv.setTextSize(24);
+        weatherTv.setPadding(dp(8), 0, 0, 0);
+        wGroup.addView(weatherTv);
+        wGroup.setOnClickListener(v -> {
+            if (sp.getString("lat", null) == null) {
+                Toast.makeText(this, "اختر المدينة من ⚙ ثم مدينة الطقس", Toast.LENGTH_LONG).show();
+            } else {
+                refreshWeather(true);
+            }
+        });
+        wGroup.setOnLongClickListener(v -> {
+            showForecast();
+            return true;
+        });
+        wGroup.setOnFocusChangeListener((v, f) -> glassBg(v, f));
+        glass.add(wGroup);
+        LinearLayout.LayoutParams wl = new LinearLayout.LayoutParams(-2, -2);
+        wl.setMarginStart(dp(14));
+        head.addView(wGroup, wl);
+
+        IconBtn src = iconBtn(1, v -> onSourceClick());
+        src.setOnLongClickListener(v -> {
+            openSourceMenu();
+            return true;
+        });
+        head.addView(src, iconLp());
+        root.addView(head, new LinearLayout.LayoutParams(-1, dp(76)));
 
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
@@ -234,7 +396,7 @@ public class MainActivity extends Activity {
         tick();
         if (sp.contains("bright")) applyBrightness(sp.getInt("bright", 100));
         h.removeCallbacks(ticker);
-        h.postDelayed(ticker, 20000);
+        h.postDelayed(ticker, 10000);
         refreshWeather(false);
     }
 
@@ -267,15 +429,6 @@ public class MainActivity extends Activity {
         levelToast.show();
     }
 
-    LinearLayout card() {
-        LinearLayout c = new LinearLayout(this);
-        c.setOrientation(LinearLayout.VERTICAL);
-        c.setGravity(Gravity.CENTER);
-        c.setPadding(dp(22), dp(6), dp(22), dp(6));
-        glass.add(c);
-        return c;
-    }
-
     IconBtn iconBtn(int type, View.OnClickListener l) {
         final IconBtn b = new IconBtn(this, type);
         b.setOnClickListener(l);
@@ -285,16 +438,18 @@ public class MainActivity extends Activity {
     }
 
     LinearLayout.LayoutParams iconLp() {
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(dp(54), dp(54));
-        p.setMarginStart(dp(14));
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(dp(44), dp(44));
+        p.setMarginStart(dp(16));
         return p;
     }
 
     void glassBg(View v, boolean focused) {
-        if (v instanceof IconBtn) {
+        boolean flat = v instanceof IconBtn || "flat".equals(v.getTag());
+        if (flat) {
             if (focused) {
                 GradientDrawable g = new GradientDrawable();
-                g.setShape(GradientDrawable.OVAL);
+                g.setShape(v instanceof IconBtn ? GradientDrawable.OVAL : GradientDrawable.RECTANGLE);
+                g.setCornerRadius(dp(22));
                 g.setColor(dark ? 0x33FFFFFF : 0x33000000);
                 g.setStroke(dp(2), focusColor());
                 v.setBackground(g);
@@ -325,6 +480,8 @@ public class MainActivity extends Activity {
         clockTv.setTextColor(tc);
         dateTv.setTextColor(tc);
         weatherTv.setTextColor(tc);
+        weatherIcon.cloudColor = dark ? 0xFFEAF0F6 : 0xFF6F8397;
+        weatherIcon.invalidate();
         for (View v : glass) {
             glassBg(v, v.hasFocus());
             if (v instanceof IconBtn) {
@@ -520,6 +677,20 @@ public class MainActivity extends Activity {
         Date now = new Date();
         clockTv.setText(new SimpleDateFormat("hh:mm a", new Locale("ar")).format(now));
         dateTv.setText(new SimpleDateFormat("EEEE، d MMMM yyyy", new Locale("ar")).format(now));
+        updateWifi();
+    }
+
+    void updateWifi() {
+        boolean on = false;
+        try {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            NetworkInfo ni = cm.getActiveNetworkInfo();
+            on = ni != null && ni.isConnected();
+        } catch (Exception ignored) { }
+        if (wifiBtn.on != on) {
+            wifiBtn.on = on;
+            wifiBtn.invalidate();
+        }
     }
 
     String http(String u) throws Exception {
@@ -534,46 +705,180 @@ public class MainActivity extends Activity {
         return sb.toString();
     }
 
-    String icon(int c) {
-        if (c == 0) return "☀️";
-        if (c <= 2) return "⛅";
-        if (c == 3) return "☁️";
-        if (c == 45 || c == 48) return "🌫️";
-        if (c >= 51 && c <= 57) return "🌦️";
-        if ((c >= 61 && c <= 67) || (c >= 80 && c <= 82)) return "🌧️";
-        if ((c >= 71 && c <= 77) || c == 85 || c == 86) return "❄️";
-        if (c >= 95) return "⛈️";
-        return "🌡️";
+    String desc(int c) {
+        int k = WIcon.kind(c);
+        if (k == 0) return "صافٍ";
+        if (k == 1) return "غائم جزئياً";
+        if (k == 2) return "غائم";
+        if (k == 3) return "ضباب";
+        if (k == 4) return "مطر";
+        if (k == 5) return "ثلج";
+        return "عاصفة رعدية";
+    }
+
+    void showWeather(String json) {
+        try {
+            JSONObject cur = new JSONObject(json).getJSONObject("current");
+            int t = (int) Math.round(cur.getDouble("temperature_2m"));
+            int code = cur.getInt("weather_code");
+            boolean night = cur.optInt("is_day", 1) == 0;
+            weatherIcon.set(code, night);
+            weatherTv.setText(t + "°");
+        } catch (Exception e) {
+            weatherTv.setText("--");
+        }
     }
 
     void refreshWeather(boolean force) {
         final String lat = sp.getString("lat", null);
         final String lon = sp.getString("lon", null);
+        String cached = sp.getString("w_json", null);
+        if (cached != null) showWeather(cached);
         if (lat == null || lon == null) {
-            weatherTv.setText("☁️ حدّد المدينة");
+            if (cached == null) {
+                weatherIcon.set(3, false);
+                weatherTv.setText("--");
+            }
             return;
         }
         long last = sp.getLong("w_time", 0);
-        String cached = sp.getString("w_text", null);
-        if (cached != null) weatherTv.setText(cached);
         if (!force && cached != null && System.currentTimeMillis() - last < 20 * 60 * 1000) return;
-        final String city = sp.getString("city", "");
         new Thread(() -> {
             try {
-                String json = http("https://api.open-meteo.com/v1/forecast?latitude=" + lat
-                        + "&longitude=" + lon + "&current=temperature_2m,weather_code&timezone=auto");
-                JSONObject cur = new JSONObject(json).getJSONObject("current");
-                int t = (int) Math.round(cur.getDouble("temperature_2m"));
-                int code = cur.getInt("weather_code");
-                final String txt = icon(code) + " " + t + "°  " + city;
-                sp.edit().putString("w_text", txt).putLong("w_time", System.currentTimeMillis()).apply();
-                runOnUiThread(() -> weatherTv.setText(txt));
+                final String json = http("https://api.open-meteo.com/v1/forecast?latitude=" + lat
+                        + "&longitude=" + lon
+                        + "&current=temperature_2m,weather_code,is_day"
+                        + "&daily=weather_code,temperature_2m_max,temperature_2m_min"
+                        + "&forecast_days=5&timezone=auto");
+                new JSONObject(json).getJSONObject("current");
+                sp.edit().putString("w_json", json).putLong("w_time", System.currentTimeMillis()).apply();
+                runOnUiThread(() -> showWeather(json));
             } catch (Exception e) {
-                runOnUiThread(() -> {
-                    if (sp.getString("w_text", null) == null) weatherTv.setText("☁️ --");
-                });
+                // نُبقي آخر قيمة محفوظة
             }
         }).start();
+    }
+
+    void showForecast() {
+        String json = sp.getString("w_json", null);
+        if (json == null) {
+            Toast.makeText(this, "لا توجد بيانات طقس بعد. اختر المدينة من ⚙", Toast.LENGTH_LONG).show();
+            return;
+        }
+        try {
+            JSONObject root = new JSONObject(json);
+            JSONObject cur = root.getJSONObject("current");
+            JSONObject daily = root.getJSONObject("daily");
+            JSONArray days = daily.getJSONArray("time");
+            JSONArray codes = daily.getJSONArray("weather_code");
+            JSONArray mx = daily.getJSONArray("temperature_2m_max");
+            JSONArray mn = daily.getJSONArray("temperature_2m_min");
+
+            final Dialog dlg = new Dialog(this);
+            dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
+            LinearLayout panel = new LinearLayout(this);
+            panel.setOrientation(LinearLayout.VERTICAL);
+            panel.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+            panel.setGravity(Gravity.CENTER_HORIZONTAL);
+            panel.setPadding(dp(28), dp(22), dp(28), dp(22));
+            GradientDrawable pg = new GradientDrawable();
+            pg.setColor(0xF2101820);
+            pg.setCornerRadius(dp(24));
+            pg.setStroke(dp(1), 0x55FFFFFF);
+            panel.setBackground(pg);
+
+            TextView city = new TextView(this);
+            city.setText(sp.getString("city", ""));
+            city.setTextSize(18);
+            city.setTextColor(0xCCF4EFE6);
+            city.setGravity(Gravity.CENTER);
+            panel.addView(city);
+
+            LinearLayout now = new LinearLayout(this);
+            now.setGravity(Gravity.CENTER);
+            now.setPadding(0, dp(6), 0, dp(14));
+            WIcon ni = new WIcon(this);
+            ni.set(cur.getInt("weather_code"), cur.optInt("is_day", 1) == 0);
+            now.addView(ni, new LinearLayout.LayoutParams(dp(64), dp(64)));
+            TextView nt = new TextView(this);
+            nt.setText((int) Math.round(cur.getDouble("temperature_2m")) + "°");
+            nt.setTextSize(46);
+            nt.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+            nt.setTextColor(0xFFF4EFE6);
+            nt.setPadding(dp(14), 0, dp(14), 0);
+            now.addView(nt);
+            TextView nd = new TextView(this);
+            nd.setText(desc(cur.getInt("weather_code")));
+            nd.setTextSize(20);
+            nd.setTextColor(0xCCF4EFE6);
+            now.addView(nd);
+            panel.addView(now);
+
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER);
+            SimpleDateFormat in = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+            SimpleDateFormat out = new SimpleDateFormat("EEEE", new Locale("ar"));
+            int n = Math.min(5, days.length());
+            for (int i = 0; i < n; i++) {
+                LinearLayout col = new LinearLayout(this);
+                col.setOrientation(LinearLayout.VERTICAL);
+                col.setGravity(Gravity.CENTER);
+                col.setPadding(dp(14), dp(10), dp(14), dp(10));
+                GradientDrawable cg = new GradientDrawable();
+                cg.setColor(i == 0 ? 0x26FFFFFF : 0x10FFFFFF);
+                cg.setCornerRadius(dp(16));
+                col.setBackground(cg);
+
+                TextView dn = new TextView(this);
+                String name;
+                if (i == 0) {
+                    name = "اليوم";
+                } else {
+                    try {
+                        name = out.format(in.parse(days.getString(i)));
+                    } catch (Exception e) {
+                        name = days.getString(i);
+                    }
+                }
+                dn.setText(name);
+                dn.setTextSize(16);
+                dn.setTextColor(0xFFF4EFE6);
+                dn.setGravity(Gravity.CENTER);
+                col.addView(dn);
+
+                WIcon wi = new WIcon(this);
+                wi.set(codes.getInt(i), false);
+                LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(dp(48), dp(48));
+                wlp.setMargins(0, dp(6), 0, dp(6));
+                col.addView(wi, wlp);
+
+                TextView hi = new TextView(this);
+                hi.setText((int) Math.round(mx.getDouble(i)) + "°");
+                hi.setTextSize(22);
+                hi.setTextColor(0xFFF4EFE6);
+                hi.setGravity(Gravity.CENTER);
+                col.addView(hi);
+                TextView lo = new TextView(this);
+                lo.setText((int) Math.round(mn.getDouble(i)) + "°");
+                lo.setTextSize(16);
+                lo.setTextColor(0x99F4EFE6);
+                lo.setGravity(Gravity.CENTER);
+                col.addView(lo);
+
+                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(104), -2);
+                clp.setMargins(dp(5), 0, dp(5), 0);
+                row.addView(col, clp);
+            }
+            panel.addView(row);
+
+            dlg.setContentView(panel);
+            if (dlg.getWindow() != null) {
+                dlg.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            }
+            dlg.show();
+        } catch (Exception e) {
+            Toast.makeText(this, "تعذر عرض التوقعات", Toast.LENGTH_LONG).show();
+        }
     }
 
     void askCity() {
@@ -606,7 +911,7 @@ public class MainActivity extends Activity {
                         .putString("lat", String.valueOf(o.getDouble("latitude")))
                         .putString("lon", String.valueOf(o.getDouble("longitude")))
                         .putString("city", o.optString("name", name))
-                        .remove("w_text")
+                        .remove("w_json")
                         .apply();
                 runOnUiThread(() -> refreshWeather(true));
             } catch (Exception e) {
@@ -624,7 +929,8 @@ public class MainActivity extends Activity {
             "💡  السطوع",
             "🔐  السماح بتعديل سطوع النظام",
             "⌨️  تفعيل أزرار CH للسطوع",
-            "🏠  تعيين كواجهة افتراضية"};
+            "🏠  تعيين كواجهة افتراضية",
+            "🔎  إعداد زر المصدر"};
         new AlertDialog.Builder(this)
                 .setTitle("الإعدادات")
                 .setItems(items, (dlg, which) -> {
@@ -645,8 +951,10 @@ public class MainActivity extends Activity {
                         allowWriteSettings();
                     } else if (which == 6) {
                         openAccessibility();
-                    } else {
+                    } else if (which == 7) {
                         openHomeSettings();
+                    } else {
+                        openSourceMenu();
                     }
                 }).show();
     }
@@ -716,7 +1024,31 @@ public class MainActivity extends Activity {
         }
     }
 
-    void openSource() {
+    /** ضغطة واحدة: تفتح قائمة المصدر المحفوظة مباشرة، وإن لم تُحفظ بعد تظهر قائمة الإعداد */
+    void onSourceClick() {
+        String cmp = sp.getString("src_cmp", null);
+        if (cmp == null) {
+            openSourceMenu();
+        } else {
+            launchComponent(cmp);
+        }
+    }
+
+    boolean launchComponent(String flat) {
+        try {
+            ComponentName cn = ComponentName.unflattenFromString(flat);
+            Intent i = new Intent(Intent.ACTION_MAIN);
+            i.setComponent(cn);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+            return true;
+        } catch (Exception e) {
+            Toast.makeText(this, "تعذر فتح قائمة المصدر. اضغط مطولاً على الأيقونة لإعادة الإعداد", Toast.LENGTH_LONG).show();
+            return false;
+        }
+    }
+
+    void openSourceMenu() {
         final List<String> labels = new ArrayList<>();
         final List<String> ids = new ArrayList<>();
         try {
@@ -730,30 +1062,86 @@ public class MainActivity extends Activity {
                 }
             }
         } catch (Exception ignored) { }
-        if (sp.getString("src_pkg", null) != null) {
-            labels.add("▶  فتح تطبيق المصدر المحدد");
-            ids.add("#pkg");
+        labels.add("🔎  البحث عن قائمة المصدر في الشاشة");
+        ids.add("#find");
+        if (sp.getString("src_cmp", null) != null) {
+            labels.add("🗑  حذف القائمة المحفوظة");
+            ids.add("#clear");
         }
-        labels.add("⚙  اختيار تطبيق المصدر يدوياً");
-        ids.add("#pick");
-        labels.add("ℹ️  عرض تفاصيل المداخل (للتشخيص)");
+        labels.add("ℹ️  تفاصيل المداخل (للتشخيص)");
         ids.add("#diag");
         new AlertDialog.Builder(this)
                 .setTitle("المصدر")
                 .setItems(labels.toArray(new String[0]), (dlg, which) -> {
                     String id = ids.get(which);
-                    if (id.equals("#pick")) {
-                        chooseApp("اختر تطبيق المصدر", pkg -> {
-                            sp.edit().putString("src_pkg", pkg).apply();
-                            launch(pkg);
-                        });
-                    } else if (id.equals("#pkg")) {
-                        launch(sp.getString("src_pkg", ""));
+                    if (id.equals("#find")) {
+                        findSourceActivities();
+                    } else if (id.equals("#clear")) {
+                        sp.edit().remove("src_cmp").apply();
+                        Toast.makeText(this, "تم الحذف", Toast.LENGTH_SHORT).show();
                     } else if (id.equals("#diag")) {
                         showInputsInfo();
                     } else {
                         switchInput(id);
                     }
+                }).show();
+    }
+
+    void findSourceActivities() {
+        Toast.makeText(this, "جارٍ البحث...", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            final List<String[]> res = new ArrayList<>();
+            try {
+                PackageManager pm = getPackageManager();
+                List<PackageInfo> pkgs = pm.getInstalledPackages(PackageManager.GET_ACTIVITIES);
+                for (PackageInfo pi : pkgs) {
+                    if (pi.activities == null) continue;
+                    if (pi.packageName.equals(getPackageName())) continue;
+                    for (ActivityInfo ai : pi.activities) {
+                        if (!ai.exported) continue;
+                        String n = (ai.name + " " + ai.packageName).toLowerCase(Locale.US);
+                        if (n.contains("inputmethod") || n.contains("keyboard")) continue;
+                        int score = 0;
+                        if (n.contains("source")) score += 3;
+                        if (n.contains("hdmi")) score += 2;
+                        if (n.contains("signal")) score += 2;
+                        if (n.contains("input")) score += 2;
+                        if (score == 0) continue;
+                        if (n.contains("tv")) score += 1;
+                        String cls = ai.name;
+                        int dot = cls.lastIndexOf('.');
+                        String shortName = dot >= 0 ? cls.substring(dot + 1) : cls;
+                        String label = String.valueOf(ai.loadLabel(pm));
+                        res.add(new String[]{String.valueOf(100 - score),
+                                label + "  ·  " + shortName,
+                                new ComponentName(ai.packageName, ai.name).flattenToString()});
+                    }
+                }
+            } catch (Exception ignored) { }
+            Collections.sort(res, (a, c) -> a[0].compareTo(c[0]));
+            runOnUiThread(() -> showSourceCandidates(res));
+        }).start();
+    }
+
+    void showSourceCandidates(final List<String[]> res) {
+        if (res.isEmpty()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("المصدر")
+                    .setMessage("لم أجد شاشة للمصدر. جرّب خيار «تفاصيل المداخل» وابعث لي صورته.")
+                    .setPositiveButton("إغلاق", null)
+                    .show();
+            return;
+        }
+        int n = Math.min(40, res.size());
+        String[] labels = new String[n];
+        for (int k = 0; k < n; k++) labels[k] = res.get(k)[1];
+        new AlertDialog.Builder(this)
+                .setTitle("اختر ثم جرّب: ما يفتح قائمة المصدر يُحفظ")
+                .setItems(labels, (dlg, which) -> {
+                    String flat = res.get(which)[2];
+                    sp.edit().putString("src_cmp", flat).apply();
+                    Toast.makeText(this, "تم الحفظ. إن لم تفتح قائمة المصدر فكرر البحث واختر غيرها", Toast.LENGTH_LONG).show();
+                    launchComponent(flat);
                 }).show();
     }
 
@@ -788,7 +1176,7 @@ public class MainActivity extends Activity {
             startActivity(new Intent(Intent.ACTION_VIEW,
                     TvContract.buildChannelUriForPassthroughInput(id)));
         } catch (Exception e) {
-            Toast.makeText(this, "تعذر التبديل، اختر تطبيق المصدر يدوياً", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "تعذر التبديل إلى هذا المدخل", Toast.LENGTH_LONG).show();
         }
     }
 
@@ -804,7 +1192,7 @@ public class MainActivity extends Activity {
         DisplayMetrics dm = getResources().getDisplayMetrics();
         int m = dp(6);
         int cw = dm.widthPixels - dp(56);
-        int availH = dm.heightPixels - dp(36) - dp(92) - dp(10);
+        int availH = dm.heightPixels - dp(36) - dp(76) - dp(10);
         float ratio = 1.6f;
         int wS = (cw - 8 * m) / 4;
         int hS = (int) (wS / ratio);
@@ -836,6 +1224,43 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** اللون الغالب في أيقونة التطبيق، لتلوين البطاقة */
+    int dominant(Drawable dr) {
+        try {
+            int sz = 32;
+            Bitmap bm = Bitmap.createBitmap(sz, sz, Bitmap.Config.ARGB_8888);
+            Canvas cv = new Canvas(bm);
+            dr.setBounds(0, 0, sz, sz);
+            dr.draw(cv);
+            long r = 0, g = 0, b = 0, n = 0;
+            for (int x = 0; x < sz; x++) {
+                for (int y = 0; y < sz; y++) {
+                    int px = bm.getPixel(x, y);
+                    if (Color.alpha(px) < 200) continue;
+                    r += Color.red(px);
+                    g += Color.green(px);
+                    b += Color.blue(px);
+                    n++;
+                }
+            }
+            if (n == 0) return 0xFF2A2F36;
+            return Color.rgb((int) (r / n), (int) (g / n), (int) (b / n));
+        } catch (Exception e) {
+            return 0xFF2A2F36;
+        }
+    }
+
+    int[] shades(int base) {
+        float[] hsv = new float[3];
+        Color.colorToHSV(base, hsv);
+        if (hsv[1] < 0.22f) return new int[]{0xFF39424D, 0xFF1B2128};
+        float[] a = hsv.clone();
+        a[2] = Math.min(1f, hsv[2] * 0.95f);
+        float[] bb = hsv.clone();
+        bb[2] = hsv[2] * 0.55f;
+        return new int[]{Color.HSVToColor(a), Color.HSVToColor(bb)};
+    }
+
     View tile(final int i, boolean big, int w, int hh) {
         final String pkg = sp.getString("s" + i, null);
         final FrameLayout t = new FrameLayout(this);
@@ -844,6 +1269,7 @@ public class MainActivity extends Activity {
 
         PackageManager pm = getPackageManager();
         boolean filled = false;
+        boolean colored = false;
         if (pkg != null) {
             try {
                 ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
@@ -867,17 +1293,24 @@ public class MainActivity extends Activity {
                     });
                     t.addView(iv, new FrameLayout.LayoutParams(-1, -1));
                 } else {
+                    Drawable icon = pm.getApplicationIcon(ai);
+                    int[] cols = shades(dominant(icon));
+                    GradientDrawable gd = new GradientDrawable(GradientDrawable.Orientation.TL_BR, cols);
+                    gd.setCornerRadius(dp(18));
+                    t.setBackground(gd);
+                    colored = true;
                     LinearLayout box = new LinearLayout(this);
                     box.setOrientation(LinearLayout.VERTICAL);
                     box.setGravity(Gravity.CENTER);
                     ImageView iv = new ImageView(this);
-                    iv.setImageDrawable(pm.getApplicationIcon(ai));
-                    int s = (int) (hh * (big ? 0.5f : 0.46f));
+                    iv.setImageDrawable(icon);
+                    int s = (int) (hh * (big ? 0.56f : 0.5f));
                     box.addView(iv, new LinearLayout.LayoutParams(s, s));
                     TextView name = new TextView(this);
                     name.setText(pm.getApplicationLabel(ai));
                     name.setTextSize(big ? 22 : 15);
-                    name.setTextColor(textColor());
+                    name.setTextColor(0xFFFFFFFF);
+                    name.setShadowLayer(4f, 0f, 1f, 0x99000000);
                     name.setGravity(Gravity.CENTER);
                     name.setMaxLines(1);
                     name.setPadding(dp(6), dp(6), dp(6), 0);
@@ -911,9 +1344,11 @@ public class MainActivity extends Activity {
             t.addView(box, new FrameLayout.LayoutParams(-1, -1));
         }
 
-        int fill = dark ? (filled ? 0x2EFFFFFF : 0x12FFFFFF) : (filled ? 0x99FFFFFF : 0x44FFFFFF);
-        int stroke = dark ? 0x40FFFFFF : 0x40000000;
-        bg(t, false, fill, stroke);
+        if (!colored) {
+            int fill = dark ? (filled ? 0x2EFFFFFF : 0x12FFFFFF) : (filled ? 0x99FFFFFF : 0x44FFFFFF);
+            int stroke = dark ? 0x40FFFFFF : 0x40000000;
+            bg(t, false, fill, stroke);
+        }
 
         final View ring = new View(this);
         t.addView(ring, new FrameLayout.LayoutParams(-1, -1));
