@@ -276,7 +276,15 @@ public class MainActivity extends Activity {
     IconBtn wifiBtn;
     LinearLayout midRow, bottomRow;
     String loadedKey = null;
-    Toast levelToast;
+    BrightnessService.BarView bar;
+    View[] tiles = new View[10];
+    int lastFocus = -1;
+    Runnable hideBar = new Runnable() {
+        @Override
+        public void run() {
+            if (bar != null) bar.setVisibility(View.INVISIBLE);
+        }
+    };
     final List<View> glass = new ArrayList<>();
     Handler h = new Handler(Looper.getMainLooper());
     Runnable ticker = new Runnable() {
@@ -385,6 +393,13 @@ public class MainActivity extends Activity {
         dimView.setClickable(false);
         frame.addView(dimView, new FrameLayout.LayoutParams(-1, -1));
 
+        bar = new BrightnessService.BarView(this);
+        bar.setVisibility(View.INVISIBLE);
+        FrameLayout.LayoutParams blp = new FrameLayout.LayoutParams(-2, -2,
+                Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        blp.bottomMargin = dp(60);
+        frame.addView(bar, blp);
+
         setContentView(frame);
     }
 
@@ -394,6 +409,7 @@ public class MainActivity extends Activity {
         applyLook();
         build();
         tick();
+        checkService();
         if (sp.contains("bright")) applyBrightness(sp.getInt("bright", 100));
         h.removeCallbacks(ticker);
         h.postDelayed(ticker, 10000);
@@ -412,7 +428,7 @@ public class MainActivity extends Activity {
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_CHANNEL_UP || keyCode == KeyEvent.KEYCODE_CHANNEL_DOWN) {
-            stepBrightness(keyCode == KeyEvent.KEYCODE_CHANNEL_UP ? 10 : -10);
+            stepBrightness(keyCode == KeyEvent.KEYCODE_CHANNEL_UP ? 5 : -5);
             return true;
         }
         return super.onKeyDown(keyCode, event);
@@ -420,13 +436,14 @@ public class MainActivity extends Activity {
 
     void stepBrightness(int delta) {
         int lvl = sp.getInt("bright", 100) + delta;
-        if (lvl < 10) lvl = 10;
+        if (lvl < 1) lvl = 1;
         if (lvl > 100) lvl = 100;
         sp.edit().putInt("bright", lvl).apply();
         applyBrightness(lvl);
-        if (levelToast != null) levelToast.cancel();
-        levelToast = Toast.makeText(this, "💡 السطوع " + lvl + "%", Toast.LENGTH_SHORT);
-        levelToast.show();
+        bar.setLevel(lvl);
+        bar.setVisibility(View.VISIBLE);
+        h.removeCallbacks(hideBar);
+        h.postDelayed(hideBar, 1600);
     }
 
     IconBtn iconBtn(int type, View.OnClickListener l) {
@@ -555,7 +572,7 @@ public class MainActivity extends Activity {
     }
 
     void applyBrightness(int lvl) {
-        if (lvl < 10) lvl = 10;
+        if (lvl < 1) lvl = 1;
         if (lvl > 100) lvl = 100;
         WindowManager.LayoutParams lp = getWindow().getAttributes();
         if (sp.getBoolean("svc_on", false)) {
@@ -571,7 +588,7 @@ public class MainActivity extends Activity {
                 Settings.System.putInt(getContentResolver(), Settings.System.SCREEN_BRIGHTNESS_MODE,
                         Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL);
                 Settings.System.putInt(getContentResolver(), Settings.System.SCREEN_BRIGHTNESS,
-                        Math.round(lvl * 255f / 100f));
+                        Math.max(1, Math.round(lvl * 255f / 100f)));
                 sysOk = true;
             } catch (Exception ignored) { }
         }
@@ -581,8 +598,8 @@ public class MainActivity extends Activity {
         } else {
             lp.screenBrightness = lvl >= 100
                     ? WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
-                    : Math.max(0.05f, lvl / 100f);
-            dim = (100 - lvl) / 90f * 0.55f;
+                    : Math.max(0.02f, lvl / 100f);
+            dim = (100 - lvl) / 99f * 0.55f;
         }
         getWindow().setAttributes(lp);
         dimView.setBackgroundColor(Color.argb((int) (dim * 255), 0, 0, 0));
@@ -643,13 +660,13 @@ public class MainActivity extends Activity {
         tv.setText("السطوع: " + cur + "%");
         tv.setPadding(0, 0, 0, dp(12));
         final SeekBar sb = new SeekBar(this);
-        sb.setMax(90);
-        sb.setProgress(cur - 10);
+        sb.setMax(99);
+        sb.setProgress(cur - 1);
         sb.setKeyProgressIncrement(5);
         sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
-                int lvl = p + 10;
+                int lvl = p + 1;
                 tv.setText("السطوع: " + lvl + "%");
                 applyBrightness(lvl);
             }
@@ -669,7 +686,7 @@ public class MainActivity extends Activity {
                 .setTitle("السطوع")
                 .setView(box)
                 .setPositiveButton("تم", null)
-                .setOnDismissListener(dlg -> sp.edit().putInt("bright", sb.getProgress() + 10).apply())
+                .setOnDismissListener(dlg -> sp.edit().putInt("bright", sb.getProgress() + 1).apply())
                 .show();
     }
 
@@ -920,6 +937,53 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    boolean svcEnabled() {
+        try {
+            String en = Settings.Secure.getString(getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            return en != null && en.contains(getPackageName() + "/");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** إن أوقف النظام الخدمة بعد أن كانت تعمل نخبرك بدل أن يتعطل السطوع بصمت */
+    void checkService() {
+        if (sp.getBoolean("svc_want", false) && !svcEnabled()) {
+            sp.edit().putBoolean("svc_on", false).putBoolean("svc_want", false).apply();
+            Toast.makeText(this, "أوقف النظام خدمة أزرار CH. فعّلها من ⚙ ثم أزرار CH", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    void learnWifiKey() {
+        if (!svcEnabled()) {
+            Toast.makeText(this, "فعّل أزرار CH أولاً من إمكانية الوصول، فالزر يعمل عبرها", Toast.LENGTH_LONG).show();
+            openAccessibility();
+            return;
+        }
+        sp.edit().putBoolean("learn_key", true).apply();
+        final AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle("زر الواي فاي")
+                .setMessage("اضغط الآن على الزر الذي تريده في الريموت.\n(لا يصلح زر الرجوع أو الرئيسية أو الموافق)")
+                .setNegativeButton("إلغاء", null)
+                .setNeutralButton("حذف الزر المحفوظ", (d2, w) -> sp.edit().remove("wifi_key").apply())
+                .setOnDismissListener(d3 -> sp.edit().putBoolean("learn_key", false).apply())
+                .show();
+        h.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (!dlg.isShowing()) return;
+                if (!sp.getBoolean("learn_key", false)) {
+                    dlg.dismiss();
+                    Toast.makeText(MainActivity.this, "تم تعيين الزر: "
+                            + KeyEvent.keyCodeToString(sp.getInt("wifi_key", 0)), Toast.LENGTH_LONG).show();
+                } else {
+                    h.postDelayed(this, 400);
+                }
+            }
+        }, 400);
+    }
+
     void openSettings() {
         String[] items = {
             "🎨  تغيير الخلفية",
@@ -928,7 +992,8 @@ public class MainActivity extends Activity {
             "🔄  تحديث الطقس",
             "💡  السطوع",
             "🔐  السماح بتعديل سطوع النظام",
-            "⌨️  تفعيل أزرار CH للسطوع",
+            "⌨️  أزرار CH للسطوع: " + (svcEnabled() ? "مفعّلة ✅" : "غير مفعّلة ❌"),
+            "📶  تعيين زر الواي فاي في الريموت",
             "🏠  تعيين كواجهة افتراضية",
             "🔎  إعداد زر المصدر"};
         new AlertDialog.Builder(this)
@@ -952,6 +1017,8 @@ public class MainActivity extends Activity {
                     } else if (which == 6) {
                         openAccessibility();
                     } else if (which == 7) {
+                        learnWifiKey();
+                    } else if (which == 8) {
                         openHomeSettings();
                     } else {
                         openSourceMenu();
@@ -1222,6 +1289,11 @@ public class MainActivity extends Activity {
         for (int i = 5; i < 10; i++) {
             bottomRow.addView(tile(i, false, wB, hB), cellLp(wB, hB, m));
         }
+        final int fi = lastFocus >= 0 ? lastFocus : 0;
+        midRow.post(() -> {
+            View ft = tiles[fi];
+            if (ft != null) ft.requestFocus();
+        });
     }
 
     /** اللون الغالب في أيقونة التطبيق، لتلوين البطاقة */
@@ -1357,11 +1429,13 @@ public class MainActivity extends Activity {
         ringBg.setCornerRadius(dp(18));
         ringBg.setStroke(dp(4), focusColor());
         t.setOnFocusChangeListener((v, f) -> {
+            if (f) lastFocus = i;
             ring.setBackground(f ? ringBg : null);
             v.animate().scaleX(f ? 1.04f : 1f).scaleY(f ? 1.04f : 1f).setDuration(120).start();
         });
 
         t.setOnClickListener(v -> {
+            lastFocus = i;
             if (isFilled) {
                 launch(pkg);
             } else {
@@ -1375,6 +1449,7 @@ public class MainActivity extends Activity {
             if (isFilled) options(i);
             return true;
         });
+        tiles[i] = t;
         return t;
     }
 
