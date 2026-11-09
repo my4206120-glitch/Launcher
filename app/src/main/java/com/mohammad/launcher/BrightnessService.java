@@ -25,7 +25,13 @@ import android.widget.Toast;
 public class BrightnessService extends AccessibilityService
         implements SharedPreferences.OnSharedPreferenceChangeListener {
 
-    /** شريط السطوع (شمس + شريط + رقم من 1 إلى 100) */
+    /** يرفع خطوة واحدة (5) أو ينزل خطوة، ويثبّت الرقم على مضاعفات الخمسة */
+    public static int snap(int cur, int dir) {
+        if (dir > 0) return Math.min(100, (cur / 5 + 1) * 5);
+        return Math.max(0, ((cur + 4) / 5 - 1) * 5);
+    }
+
+    /** رقم السطوع فقط (0 إلى 100) داخل كبسولة داكنة */
     public static class BarView extends View {
         int level = 100;
         final float d;
@@ -34,7 +40,6 @@ public class BrightnessService extends AccessibilityService
         public BarView(Context c) {
             super(c);
             d = c.getResources().getDisplayMetrics().density;
-            p.setStrokeCap(Paint.Cap.ROUND);
         }
 
         public void setLevel(int l) {
@@ -44,7 +49,7 @@ public class BrightnessService extends AccessibilityService
 
         @Override
         protected void onMeasure(int a, int b) {
-            setMeasuredDimension((int) (440 * d), (int) (68 * d));
+            setMeasuredDimension((int) (150 * d), (int) (84 * d));
         }
 
         @Override
@@ -53,32 +58,10 @@ public class BrightnessService extends AccessibilityService
             p.setStyle(Paint.Style.FILL);
             p.setColor(0xE6101820);
             c.drawRoundRect(new RectF(0, 0, w, h), h / 2f, h / 2f, p);
-
-            float sx = h * 0.55f, sy = h / 2f, r = h * 0.13f;
-            p.setColor(0xFFFFC845);
-            c.drawCircle(sx, sy, r, p);
-            p.setStyle(Paint.Style.STROKE);
-            p.setStrokeWidth(h * 0.045f);
-            for (int k = 0; k < 8; k++) {
-                double a = Math.toRadians(k * 45);
-                c.drawLine(sx + (float) Math.cos(a) * r * 1.5f, sy + (float) Math.sin(a) * r * 1.5f,
-                        sx + (float) Math.cos(a) * r * 2.0f, sy + (float) Math.sin(a) * r * 2.0f, p);
-            }
-
-            float bx = h * 1.05f;
-            float bw = w - h * 1.05f - h * 1.15f;
-            float bh = h * 0.14f;
-            float by = h / 2f - bh / 2f;
-            p.setStyle(Paint.Style.FILL);
-            p.setColor(0x44FFFFFF);
-            c.drawRoundRect(new RectF(bx, by, bx + bw, by + bh), bh / 2f, bh / 2f, p);
-            p.setColor(0xFFFFC845);
-            c.drawRoundRect(new RectF(bx, by, bx + bw * level / 100f, by + bh), bh / 2f, bh / 2f, p);
-
             p.setColor(0xFFFFFFFF);
-            p.setTextSize(h * 0.36f);
+            p.setTextSize(h * 0.5f);
             p.setTextAlign(Paint.Align.CENTER);
-            c.drawText(String.valueOf(level), w - h * 0.6f, h / 2f + h * 0.13f, p);
+            c.drawText(String.valueOf(level), w / 2f, h / 2f + h * 0.18f, p);
         }
     }
 
@@ -103,7 +86,8 @@ public class BrightnessService extends AccessibilityService
             sp = getSharedPreferences("launcher", MODE_PRIVATE);
             wm = (WindowManager) getSystemService(WINDOW_SERVICE);
             sp.registerOnSharedPreferenceChangeListener(this);
-            sp.edit().putBoolean("svc_on", true).putBoolean("svc_want", true).apply();
+            sp.edit().putBoolean("svc_on", true).putBoolean("svc_want", true)
+                    .putLong("svc_conn", System.currentTimeMillis()).apply();
             screenReceiver = new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context c, Intent i) {
@@ -148,6 +132,12 @@ public class BrightnessService extends AccessibilityService
             int k = ev.getKeyCode();
             boolean down = ev.getAction() == KeyEvent.ACTION_DOWN;
 
+            if (down) {
+                sp.edit().putInt("svc_keys", sp.getInt("svc_keys", 0) + 1)
+                        .putString("svc_lastkey", KeyEvent.keyCodeToString(k))
+                        .putLong("svc_lastkey_t", System.currentTimeMillis()).apply();
+            }
+
             if (sp.getBoolean("learn_key", false)) {
                 if (k == KeyEvent.KEYCODE_BACK || k == KeyEvent.KEYCODE_HOME
                         || k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER
@@ -169,9 +159,7 @@ public class BrightnessService extends AccessibilityService
 
             if (k == KeyEvent.KEYCODE_CHANNEL_UP || k == KeyEvent.KEYCODE_CHANNEL_DOWN) {
                 if (down) {
-                    int lvl = sp.getInt("bright", 100) + (k == KeyEvent.KEYCODE_CHANNEL_UP ? 5 : -5);
-                    if (lvl < 1) lvl = 1;
-                    if (lvl > 100) lvl = 100;
+                    int lvl = snap(sp.getInt("bright", 100), k == KeyEvent.KEYCODE_CHANNEL_UP ? 1 : -1);
                     sp.edit().putInt("bright", lvl).apply();
                     apply(lvl);
                     showBar(lvl);
@@ -199,7 +187,7 @@ public class BrightnessService extends AccessibilityService
     }
 
     void apply(int lvl) {
-        if (lvl < 1) lvl = 1;
+        if (lvl < 0) lvl = 0;
         if (lvl > 100) lvl = 100;
         lastApplied = lvl;
         boolean sysOk = false;
@@ -212,7 +200,7 @@ public class BrightnessService extends AccessibilityService
                 sysOk = true;
             } catch (Exception ignored) { }
         }
-        setDim(sysOk ? 0f : (100 - lvl) / 99f * 0.6f);
+        setDim(sysOk ? 0f : (100 - lvl) / 100f * 0.6f);
     }
 
     WindowManager.LayoutParams overlayParams(int w, int h) {
@@ -271,7 +259,7 @@ public class BrightnessService extends AccessibilityService
         } catch (Exception ignored) { }
     }
 
-    void cleanup() {
+    void cleanup(String reason) {
         try {
             handler.removeCallbacks(hideBar);
             removeBar();
@@ -282,20 +270,22 @@ public class BrightnessService extends AccessibilityService
             }
             if (sp != null) {
                 sp.unregisterOnSharedPreferenceChangeListener(this);
-                sp.edit().putBoolean("svc_on", false).apply();
+                sp.edit().putBoolean("svc_on", false)
+                        .putLong("svc_stop", System.currentTimeMillis())
+                        .putString("svc_reason", reason).apply();
             }
         } catch (Exception ignored) { }
     }
 
     @Override
     public boolean onUnbind(Intent intent) {
-        cleanup();
+        cleanup("unbind");
         return super.onUnbind(intent);
     }
 
     @Override
     public void onDestroy() {
-        cleanup();
+        cleanup("destroy");
         super.onDestroy();
     }
 }
