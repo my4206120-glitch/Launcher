@@ -45,6 +45,7 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -128,18 +129,29 @@ public class MainActivity extends Activity {
                 ar.lineTo(cx - 0.02f * s, cy + 0.13f * s);
                 c.drawPath(ar, p);
             } else {
-                p.setStyle(Paint.Style.STROKE);
-                p.setStrokeWidth(s * 0.11f);
-                c.drawCircle(cx, cy, s * 0.17f, p);
-                p.setStrokeWidth(s * 0.1f);
-                for (int k = 0; k < 8; k++) {
-                    double a = Math.toRadians(k * 45);
-                    float x1 = cx + (float) Math.cos(a) * s * 0.27f;
-                    float y1 = cy + (float) Math.sin(a) * s * 0.27f;
-                    float x2 = cx + (float) Math.cos(a) * s * 0.36f;
-                    float y2 = cy + (float) Math.sin(a) * s * 0.36f;
-                    c.drawLine(x1, y1, x2, y2, p);
+                Path g = new Path();
+                int teeth = 8;
+                float rb = s * 0.30f, rt = s * 0.40f;
+                double step = Math.toRadians(360.0 / teeth);
+                for (int k = 0; k < teeth; k++) {
+                    double a0 = k * step;
+                    double bw = step * 0.30, tw = step * 0.17;
+                    double[] angs = {a0 - bw, a0 - tw, a0 + tw, a0 + bw};
+                    float[] rads = {rb, rt, rt, rb};
+                    for (int j = 0; j < 4; j++) {
+                        float x = cx + (float) (Math.cos(angs[j]) * rads[j]);
+                        float y = cy + (float) (Math.sin(angs[j]) * rads[j]);
+                        if (k == 0 && j == 0) g.moveTo(x, y);
+                        else g.lineTo(x, y);
+                    }
+                    double mid = a0 + step / 2;
+                    g.lineTo(cx + (float) (Math.cos(mid) * rb), cy + (float) (Math.sin(mid) * rb));
                 }
+                g.close();
+                g.addCircle(cx, cy, s * 0.14f, Path.Direction.CCW);
+                g.setFillType(Path.FillType.EVEN_ODD);
+                p.setStyle(Paint.Style.FILL);
+                c.drawPath(g, p);
             }
         }
     }
@@ -263,6 +275,29 @@ public class MainActivity extends Activity {
                 c.drawPath(bolt, p);
             }
             c.restore();
+        }
+    }
+
+    /** أيقونة المزيد: تسع نقاط */
+    static class DotsView extends View {
+        int color = 0xFFF4EFE6;
+        final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        DotsView(Context c) {
+            super(c);
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            float s = Math.min(getWidth(), getHeight());
+            float cx = getWidth() / 2f, cy = getHeight() / 2f;
+            p.setColor(color);
+            p.setStyle(Paint.Style.FILL);
+            for (int i = -1; i <= 1; i++) {
+                for (int j = -1; j <= 1; j++) {
+                    c.drawCircle(cx + i * s * 0.28f, cy + j * s * 0.28f, s * 0.075f, p);
+                }
+            }
         }
     }
 
@@ -428,16 +463,14 @@ public class MainActivity extends Activity {
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_CHANNEL_UP || keyCode == KeyEvent.KEYCODE_CHANNEL_DOWN) {
-            stepBrightness(keyCode == KeyEvent.KEYCODE_CHANNEL_UP ? 5 : -5);
+            stepBrightness(keyCode == KeyEvent.KEYCODE_CHANNEL_UP ? 1 : -1);
             return true;
         }
         return super.onKeyDown(keyCode, event);
     }
 
-    void stepBrightness(int delta) {
-        int lvl = sp.getInt("bright", 100) + delta;
-        if (lvl < 1) lvl = 1;
-        if (lvl > 100) lvl = 100;
+    void stepBrightness(int dir) {
+        int lvl = BrightnessService.snap(sp.getInt("bright", 100), dir);
         sp.edit().putInt("bright", lvl).apply();
         applyBrightness(lvl);
         bar.setLevel(lvl);
@@ -572,7 +605,7 @@ public class MainActivity extends Activity {
     }
 
     void applyBrightness(int lvl) {
-        if (lvl < 1) lvl = 1;
+        if (lvl < 0) lvl = 0;
         if (lvl > 100) lvl = 100;
         WindowManager.LayoutParams lp = getWindow().getAttributes();
         if (sp.getBoolean("svc_on", false)) {
@@ -599,7 +632,7 @@ public class MainActivity extends Activity {
             lp.screenBrightness = lvl >= 100
                     ? WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
                     : Math.max(0.02f, lvl / 100f);
-            dim = (100 - lvl) / 99f * 0.55f;
+            dim = (100 - lvl) / 100f * 0.55f;
         }
         getWindow().setAttributes(lp);
         dimView.setBackgroundColor(Color.argb((int) (dim * 255), 0, 0, 0));
@@ -660,13 +693,13 @@ public class MainActivity extends Activity {
         tv.setText("السطوع: " + cur + "%");
         tv.setPadding(0, 0, 0, dp(12));
         final SeekBar sb = new SeekBar(this);
-        sb.setMax(99);
-        sb.setProgress(cur - 1);
+        sb.setMax(100);
+        sb.setProgress(cur);
         sb.setKeyProgressIncrement(5);
         sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
-                int lvl = p + 1;
+                int lvl = p;
                 tv.setText("السطوع: " + lvl + "%");
                 applyBrightness(lvl);
             }
@@ -686,7 +719,7 @@ public class MainActivity extends Activity {
                 .setTitle("السطوع")
                 .setView(box)
                 .setPositiveButton("تم", null)
-                .setOnDismissListener(dlg -> sp.edit().putInt("bright", sb.getProgress() + 1).apply())
+                .setOnDismissListener(dlg -> sp.edit().putInt("bright", sb.getProgress()).apply())
                 .show();
     }
 
@@ -951,8 +984,34 @@ public class MainActivity extends Activity {
     void checkService() {
         if (sp.getBoolean("svc_want", false) && !svcEnabled()) {
             sp.edit().putBoolean("svc_on", false).putBoolean("svc_want", false).apply();
-            Toast.makeText(this, "أوقف النظام خدمة أزرار CH. فعّلها من ⚙ ثم أزرار CH", Toast.LENGTH_LONG).show();
+            new AlertDialog.Builder(this)
+                    .setTitle("أزرار CH متوقفة")
+                    .setMessage("أوقف نظام الشاشة خدمة الأزرار. فعّلها من جديد لتعمل داخل التطبيقات.")
+                    .setPositiveButton("فتح إمكانية الوصول", (dlg, w) -> openAccessibility())
+                    .setNegativeButton("لاحقاً", null)
+                    .show();
         }
+    }
+
+    String fmt(long t) {
+        return t == 0 ? "—" : new SimpleDateFormat("d/M HH:mm:ss", Locale.US).format(new Date(t));
+    }
+
+    void showServiceStatus() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("مفعّلة في النظام: ").append(svcEnabled() ? "نعم" : "لا").append("\n");
+        sb.append("متصلة الآن: ").append(sp.getBoolean("svc_on", false) ? "نعم" : "لا").append("\n");
+        sb.append("آخر اتصال: ").append(fmt(sp.getLong("svc_conn", 0))).append("\n");
+        sb.append("آخر توقف: ").append(fmt(sp.getLong("svc_stop", 0)))
+                .append(" (").append(sp.getString("svc_reason", "—")).append(")\n");
+        sb.append("عدد الأزرار المستلمة: ").append(sp.getInt("svc_keys", 0)).append("\n");
+        sb.append("آخر زر: ").append(sp.getString("svc_lastkey", "—"))
+                .append("  ").append(fmt(sp.getLong("svc_lastkey_t", 0)));
+        new AlertDialog.Builder(this)
+                .setTitle("حالة الخدمة")
+                .setMessage(sb.toString())
+                .setPositiveButton("إغلاق", null)
+                .show();
     }
 
     void learnWifiKey() {
@@ -993,6 +1052,7 @@ public class MainActivity extends Activity {
             "💡  السطوع",
             "🔐  السماح بتعديل سطوع النظام",
             "⌨️  أزرار CH للسطوع: " + (svcEnabled() ? "مفعّلة ✅" : "غير مفعّلة ❌"),
+            "📋  حالة خدمة الأزرار",
             "📶  تعيين زر الواي فاي في الريموت",
             "🏠  تعيين كواجهة افتراضية",
             "🔎  إعداد زر المصدر"};
@@ -1017,8 +1077,10 @@ public class MainActivity extends Activity {
                     } else if (which == 6) {
                         openAccessibility();
                     } else if (which == 7) {
-                        learnWifiKey();
+                        showServiceStatus();
                     } else if (which == 8) {
+                        learnWifiKey();
+                    } else if (which == 9) {
                         openHomeSettings();
                     } else {
                         openSourceMenu();
@@ -1272,6 +1334,10 @@ public class MainActivity extends Activity {
             wB = (int) (wB * f);
             hB = (int) (hB * f);
         }
+        wS = (int) (wS * 0.95f);
+        hS = (int) (hS * 0.95f);
+        wB = (int) (wB * 0.95f);
+        hB = (int) (hB * 0.95f);
         int wBig = 2 * wS + 2 * m;
         int hBig = 2 * hS + 2 * m;
 
@@ -1333,95 +1399,90 @@ public class MainActivity extends Activity {
         return new int[]{Color.HSVToColor(a), Color.HSVToColor(bb)};
     }
 
-    View tile(final int i, boolean big, int w, int hh) {
-        final String pkg = sp.getString("s" + i, null);
-        final FrameLayout t = new FrameLayout(this);
+    FrameLayout appCard(String pkg, int hh, boolean big) {
+        if (pkg == null) return null;
+        PackageManager pm = getPackageManager();
+        try {
+            ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+            FrameLayout t = new FrameLayout(this);
+            t.setFocusable(true);
+            t.setClickable(true);
+            Drawable banner = null;
+            try {
+                Intent li = pm.getLeanbackLaunchIntentForPackage(pkg);
+                if (li == null) li = pm.getLaunchIntentForPackage(pkg);
+                if (li != null) banner = pm.getActivityBanner(li);
+            } catch (Exception ignored) { }
+            if (banner == null) banner = pm.getApplicationBanner(ai);
+            if (banner != null) {
+                ImageView iv = new ImageView(this);
+                iv.setImageDrawable(banner);
+                iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                iv.setClipToOutline(true);
+                iv.setOutlineProvider(new ViewOutlineProvider() {
+                    @Override
+                    public void getOutline(View v, Outline o) {
+                        o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), dp(18));
+                    }
+                });
+                t.addView(iv, new FrameLayout.LayoutParams(-1, -1));
+            } else {
+                Drawable icon = pm.getApplicationIcon(ai);
+                int[] cols = shades(dominant(icon));
+                GradientDrawable gd = new GradientDrawable(GradientDrawable.Orientation.TL_BR, cols);
+                gd.setCornerRadius(dp(18));
+                t.setBackground(gd);
+                LinearLayout box = new LinearLayout(this);
+                box.setOrientation(LinearLayout.VERTICAL);
+                box.setGravity(Gravity.CENTER);
+                ImageView iv = new ImageView(this);
+                iv.setImageDrawable(icon);
+                int s = (int) (hh * (big ? 0.56f : 0.5f));
+                box.addView(iv, new LinearLayout.LayoutParams(s, s));
+                TextView name = new TextView(this);
+                name.setText(pm.getApplicationLabel(ai));
+                name.setTextSize(big ? 22 : 15);
+                name.setTextColor(0xFFFFFFFF);
+                name.setShadowLayer(4f, 0f, 1f, 0x99000000);
+                name.setGravity(Gravity.CENTER);
+                name.setMaxLines(1);
+                name.setPadding(dp(6), dp(6), dp(6), 0);
+                box.addView(name);
+                t.addView(box, new FrameLayout.LayoutParams(-1, -1));
+            }
+            return t;
+        } catch (PackageManager.NameNotFoundException e) {
+            return null;
+        }
+    }
+
+    FrameLayout emptyCard(boolean big) {
+        FrameLayout t = new FrameLayout(this);
         t.setFocusable(true);
         t.setClickable(true);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER);
+        TextView plus = new TextView(this);
+        plus.setText("＋");
+        plus.setTextSize(big ? 52 : 34);
+        plus.setTextColor(textColor());
+        plus.setAlpha(0.7f);
+        plus.setGravity(Gravity.CENTER);
+        box.addView(plus);
+        TextView lbl = new TextView(this);
+        lbl.setText("أضف تطبيقاً");
+        lbl.setTextSize(big ? 20 : 14);
+        lbl.setTextColor(textColor());
+        lbl.setAlpha(0.6f);
+        lbl.setGravity(Gravity.CENTER);
+        box.addView(lbl);
+        t.addView(box, new FrameLayout.LayoutParams(-1, -1));
+        bg(t, false, dark ? 0x12FFFFFF : 0x44FFFFFF, dark ? 0x40FFFFFF : 0x40000000);
+        return t;
+    }
 
-        PackageManager pm = getPackageManager();
-        boolean filled = false;
-        boolean colored = false;
-        if (pkg != null) {
-            try {
-                ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
-                Drawable banner = null;
-                try {
-                    Intent li = pm.getLeanbackLaunchIntentForPackage(pkg);
-                    if (li == null) li = pm.getLaunchIntentForPackage(pkg);
-                    if (li != null) banner = pm.getActivityBanner(li);
-                } catch (Exception ignored) { }
-                if (banner == null) banner = pm.getApplicationBanner(ai);
-                if (banner != null) {
-                    ImageView iv = new ImageView(this);
-                    iv.setImageDrawable(banner);
-                    iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                    iv.setClipToOutline(true);
-                    iv.setOutlineProvider(new ViewOutlineProvider() {
-                        @Override
-                        public void getOutline(View v, Outline o) {
-                            o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), dp(18));
-                        }
-                    });
-                    t.addView(iv, new FrameLayout.LayoutParams(-1, -1));
-                } else {
-                    Drawable icon = pm.getApplicationIcon(ai);
-                    int[] cols = shades(dominant(icon));
-                    GradientDrawable gd = new GradientDrawable(GradientDrawable.Orientation.TL_BR, cols);
-                    gd.setCornerRadius(dp(18));
-                    t.setBackground(gd);
-                    colored = true;
-                    LinearLayout box = new LinearLayout(this);
-                    box.setOrientation(LinearLayout.VERTICAL);
-                    box.setGravity(Gravity.CENTER);
-                    ImageView iv = new ImageView(this);
-                    iv.setImageDrawable(icon);
-                    int s = (int) (hh * (big ? 0.56f : 0.5f));
-                    box.addView(iv, new LinearLayout.LayoutParams(s, s));
-                    TextView name = new TextView(this);
-                    name.setText(pm.getApplicationLabel(ai));
-                    name.setTextSize(big ? 22 : 15);
-                    name.setTextColor(0xFFFFFFFF);
-                    name.setShadowLayer(4f, 0f, 1f, 0x99000000);
-                    name.setGravity(Gravity.CENTER);
-                    name.setMaxLines(1);
-                    name.setPadding(dp(6), dp(6), dp(6), 0);
-                    box.addView(name);
-                    t.addView(box, new FrameLayout.LayoutParams(-1, -1));
-                }
-                filled = true;
-            } catch (PackageManager.NameNotFoundException e) {
-                filled = false;
-            }
-        }
-        final boolean isFilled = filled;
-        if (!filled) {
-            LinearLayout box = new LinearLayout(this);
-            box.setOrientation(LinearLayout.VERTICAL);
-            box.setGravity(Gravity.CENTER);
-            TextView plus = new TextView(this);
-            plus.setText("＋");
-            plus.setTextSize(big ? 52 : 34);
-            plus.setTextColor(textColor());
-            plus.setAlpha(0.7f);
-            plus.setGravity(Gravity.CENTER);
-            box.addView(plus);
-            TextView lbl = new TextView(this);
-            lbl.setText("أضف تطبيقاً");
-            lbl.setTextSize(big ? 20 : 14);
-            lbl.setTextColor(textColor());
-            lbl.setAlpha(0.6f);
-            lbl.setGravity(Gravity.CENTER);
-            box.addView(lbl);
-            t.addView(box, new FrameLayout.LayoutParams(-1, -1));
-        }
-
-        if (!colored) {
-            int fill = dark ? (filled ? 0x2EFFFFFF : 0x12FFFFFF) : (filled ? 0x99FFFFFF : 0x44FFFFFF);
-            int stroke = dark ? 0x40FFFFFF : 0x40000000;
-            bg(t, false, fill, stroke);
-        }
-
+    void addRing(final FrameLayout t, final int idx) {
         final View ring = new View(this);
         t.addView(ring, new FrameLayout.LayoutParams(-1, -1));
         final GradientDrawable ringBg = new GradientDrawable();
@@ -1429,11 +1490,48 @@ public class MainActivity extends Activity {
         ringBg.setCornerRadius(dp(18));
         ringBg.setStroke(dp(4), focusColor());
         t.setOnFocusChangeListener((v, f) -> {
-            if (f) lastFocus = i;
+            if (f && idx >= 0) lastFocus = idx;
             ring.setBackground(f ? ringBg : null);
             v.animate().scaleX(f ? 1.04f : 1f).scaleY(f ? 1.04f : 1f).setDuration(120).start();
         });
+    }
 
+    View moreTile(int hh) {
+        FrameLayout t = new FrameLayout(this);
+        t.setFocusable(true);
+        t.setClickable(true);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER);
+        DotsView dv = new DotsView(this);
+        dv.color = textColor();
+        int s = (int) (hh * 0.42f);
+        box.addView(dv, new LinearLayout.LayoutParams(s, s));
+        TextView lbl = new TextView(this);
+        lbl.setText("المزيد");
+        lbl.setTextSize(16);
+        lbl.setTextColor(textColor());
+        lbl.setGravity(Gravity.CENTER);
+        lbl.setPadding(0, dp(6), 0, 0);
+        box.addView(lbl);
+        t.addView(box, new FrameLayout.LayoutParams(-1, -1));
+        bg(t, false, dark ? 0x2EFFFFFF : 0x99FFFFFF, dark ? 0x40FFFFFF : 0x40000000);
+        addRing(t, 9);
+        t.setOnClickListener(v -> {
+            lastFocus = 9;
+            showMore();
+        });
+        tiles[9] = t;
+        return t;
+    }
+
+    View tile(final int i, boolean big, int w, int hh) {
+        if (i == 9) return moreTile(hh);
+        final String pkg = sp.getString("s" + i, null);
+        FrameLayout card = appCard(pkg, hh, big);
+        final boolean isFilled = card != null;
+        final FrameLayout t = isFilled ? card : emptyCard(big);
+        addRing(t, i);
         t.setOnClickListener(v -> {
             lastFocus = i;
             if (isFilled) {
@@ -1451,6 +1549,109 @@ public class MainActivity extends Activity {
         });
         tiles[i] = t;
         return t;
+    }
+
+    List<String> extras() {
+        List<String> out = new ArrayList<>();
+        PackageManager pm = getPackageManager();
+        for (String x : sp.getString("extra", "").split(",")) {
+            if (x.isEmpty()) continue;
+            try {
+                pm.getApplicationInfo(x, 0);
+                out.add(x);
+            } catch (PackageManager.NameNotFoundException e) {
+                // تطبيق محذوف
+            }
+        }
+        return out;
+    }
+
+    void saveExtras(List<String> l) {
+        sp.edit().putString("extra", android.text.TextUtils.join(",", l)).apply();
+    }
+
+    void showMore() {
+        final Dialog dlg = new Dialog(this, android.R.style.Theme_DeviceDefault_NoActionBar);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
+        panel.setPadding(dp(40), dp(28), dp(40), dp(20));
+        panel.setBackgroundColor(0xFF0B1218);
+        TextView title = new TextView(this);
+        title.setText("المزيد");
+        title.setTextSize(30);
+        title.setTextColor(0xFFF4EFE6);
+        panel.addView(title);
+        TextView hint = new TextView(this);
+        hint.setText("اضغط مطولاً على أي تطبيق لحذفه من هنا");
+        hint.setTextSize(15);
+        hint.setTextColor(0x99F4EFE6);
+        panel.addView(hint);
+        ScrollView sv = new ScrollView(this);
+        LinearLayout host = new LinearLayout(this);
+        host.setOrientation(LinearLayout.VERTICAL);
+        host.setPadding(0, dp(14), 0, 0);
+        sv.addView(host);
+        panel.addView(sv, new LinearLayout.LayoutParams(-1, 0, 1));
+        dlg.setContentView(panel);
+        fillMore(dlg, host);
+        dlg.show();
+    }
+
+    void fillMore(final Dialog dlg, final LinearLayout host) {
+        host.removeAllViews();
+        final List<String> pk = extras();
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        int cols = 5;
+        int m = dp(8);
+        int w = (dm.widthPixels - dp(80) - cols * 2 * m) / cols;
+        int hh = (int) (w / 1.6f);
+        LinearLayout row = null;
+        View first = null;
+        int total = pk.size() + 1;
+        for (int k = 0; k < total; k++) {
+            if (k % cols == 0) {
+                row = new LinearLayout(this);
+                host.addView(row, new LinearLayout.LayoutParams(-2, -2));
+            }
+            final FrameLayout c;
+            if (k < pk.size()) {
+                final String p = pk.get(k);
+                FrameLayout cc = appCard(p, hh, false);
+                if (cc == null) continue;
+                c = cc;
+                addRing(c, -1);
+                c.setOnClickListener(v -> {
+                    dlg.dismiss();
+                    launch(p);
+                });
+                c.setOnLongClickListener(v -> {
+                    new AlertDialog.Builder(this)
+                            .setItems(new String[]{"حذف من المزيد"}, (d2, which) -> {
+                                List<String> l = extras();
+                                l.remove(p);
+                                saveExtras(l);
+                                fillMore(dlg, host);
+                            }).show();
+                    return true;
+                });
+            } else {
+                c = emptyCard(false);
+                addRing(c, -1);
+                c.setOnClickListener(v -> chooseApp("اختر تطبيقاً لإضافته", p2 -> {
+                    List<String> l = extras();
+                    if (!l.contains(p2)) l.add(p2);
+                    saveExtras(l);
+                    fillMore(dlg, host);
+                }));
+            }
+            row.addView(c, cellLp(w, hh, m));
+            if (first == null) first = c;
+        }
+        final View ff = first;
+        host.post(() -> {
+            if (ff != null) ff.requestFocus();
+        });
     }
 
     void launch(String pkg) {
