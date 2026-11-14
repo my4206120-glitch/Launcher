@@ -28,6 +28,7 @@ import android.media.tv.TvInputInfo;
 import android.media.tv.TvInputManager;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
+import android.net.TrafficStats;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -314,6 +315,17 @@ public class MainActivity extends Activity {
     BrightnessService.BarView bar;
     View[] tiles = new View[10];
     int lastFocus = -1;
+    TextView speedDown, speedUp;
+    long lastRx = 0, lastTx = 0, lastT = 0;
+    static boolean procMarked = false;
+    boolean built = false;
+    Runnable speedTicker = new Runnable() {
+        @Override
+        public void run() {
+            updateSpeed();
+            h.postDelayed(this, 1000);
+        }
+    };
     Runnable hideBar = new Runnable() {
         @Override
         public void run() {
@@ -340,6 +352,11 @@ public class MainActivity extends Activity {
         sp = getSharedPreferences("launcher", MODE_PRIVATE);
         d = getResources().getDisplayMetrics().density;
         dark = sp.getBoolean("dark", true);
+        if (!procMarked) {
+            procMarked = true;
+            sp.edit().putInt("proc_starts", sp.getInt("proc_starts", 0) + 1)
+                    .putLong("proc_start_t", System.currentTimeMillis()).apply();
+        }
 
         FrameLayout frame = new FrameLayout(this);
         bgView = new ImageView(this);
@@ -410,6 +427,23 @@ public class MainActivity extends Activity {
             return true;
         });
         head.addView(src, iconLp());
+
+        head.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
+        LinearLayout speedBox = new LinearLayout(this);
+        speedBox.setOrientation(LinearLayout.VERTICAL);
+        speedBox.setGravity(Gravity.RIGHT);
+        speedDown = new TextView(this);
+        speedDown.setTextSize(16);
+        speedDown.setText("↓ 0 KB/s");
+        speedDown.setGravity(Gravity.RIGHT);
+        speedUp = new TextView(this);
+        speedUp.setTextSize(13);
+        speedUp.setAlpha(0.7f);
+        speedUp.setText("↑ 0 KB/s");
+        speedUp.setGravity(Gravity.RIGHT);
+        speedBox.addView(speedDown);
+        speedBox.addView(speedUp);
+        head.addView(speedBox);
         root.addView(head, new LinearLayout.LayoutParams(-1, dp(76)));
 
         LinearLayout body = new LinearLayout(this);
@@ -442,19 +476,41 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         applyLook();
-        build();
+        if (!built) build();
+        else restoreFocus();
         tick();
         checkService();
         if (sp.contains("bright")) applyBrightness(sp.getInt("bright", 100));
         h.removeCallbacks(ticker);
         h.postDelayed(ticker, 10000);
+        lastT = 0;
+        h.removeCallbacks(speedTicker);
+        h.post(speedTicker);
         refreshWeather(false);
+        if (sp.getBoolean("keep", true)) startKeepAlive();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         h.removeCallbacks(ticker);
+        h.removeCallbacks(speedTicker);
+    }
+
+    /** نحرّر صورة الخلفية في الخلفية لنوفّر الذاكرة للتطبيقات الأخرى */
+    @Override
+    protected void onStop() {
+        super.onStop();
+        bgView.setImageDrawable(null);
+        loadedKey = null;
+    }
+
+    void startKeepAlive() {
+        try {
+            Intent i = new Intent(this, KeepAliveService.class);
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(i);
+            else startService(i);
+        } catch (Exception ignored) { }
     }
 
     @Override
@@ -530,6 +586,8 @@ public class MainActivity extends Activity {
         clockTv.setTextColor(tc);
         dateTv.setTextColor(tc);
         weatherTv.setTextColor(tc);
+        speedDown.setTextColor(tc);
+        speedUp.setTextColor(tc);
         weatherIcon.cloudColor = dark ? 0xFFEAF0F6 : 0xFF6F8397;
         weatherIcon.invalidate();
         for (View v : glass) {
@@ -565,6 +623,7 @@ public class MainActivity extends Activity {
     }
 
     void loadImage(final Uri uri, final int resId) {
+        final DisplayMetrics dm = getResources().getDisplayMetrics();
         new Thread(() -> {
             try {
                 BitmapFactory.Options o = new BitmapFactory.Options();
@@ -577,11 +636,14 @@ public class MainActivity extends Activity {
                 } else {
                     BitmapFactory.decodeResource(getResources(), resId, o);
                 }
+                int maxW = Math.min(1280, dm.widthPixels);
+                int maxH = Math.min(720, dm.heightPixels);
                 int s = 1;
-                while (o.outWidth / s > 2000 || o.outHeight / s > 1200) s *= 2;
+                while (o.outWidth / (s * 2) >= maxW && o.outHeight / (s * 2) >= maxH) s *= 2;
                 BitmapFactory.Options o2 = new BitmapFactory.Options();
                 o2.inSampleSize = s;
                 o2.inScaled = false;
+                o2.inPreferredConfig = Bitmap.Config.RGB_565;
                 final Bitmap bmp;
                 if (uri != null) {
                     InputStream in2 = getContentResolver().openInputStream(uri);
@@ -980,9 +1042,30 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** إن أوقف النظام الخدمة بعد أن كانت تعمل نخبرك بدل أن يتعطل السطوع بصمت */
+    /** يعيد تفعيل الخدمة بلا تدخل منك إن مُنح التطبيق إذن WRITE_SECURE_SETTINGS (إعداد اختياري لمرة واحدة) */
+    boolean enableServiceSilently() {
+        try {
+            String comp = getPackageName() + "/" + BrightnessService.class.getName();
+            String cur = Settings.Secure.getString(getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (cur != null && cur.contains(comp)) return true;
+            String val = (cur == null || cur.isEmpty()) ? comp : cur + ":" + comp;
+            Settings.Secure.putString(getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, val);
+            Settings.Secure.putInt(getContentResolver(), Settings.Secure.ACCESSIBILITY_ENABLED, 1);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** إن أوقف النظام الخدمة: نعيد تفعيلها تلقائياً إن أمكن، وإلا تظهر نافذة بزر واحد */
     void checkService() {
         if (sp.getBoolean("svc_want", false) && !svcEnabled()) {
+            if (enableServiceSilently()) {
+                Toast.makeText(this, "أُعيد تفعيل أزرار CH تلقائياً", Toast.LENGTH_SHORT).show();
+                return;
+            }
             sp.edit().putBoolean("svc_on", false).putBoolean("svc_want", false).apply();
             new AlertDialog.Builder(this)
                     .setTitle("أزرار CH متوقفة")
@@ -1004,9 +1087,10 @@ public class MainActivity extends Activity {
         sb.append("آخر اتصال: ").append(fmt(sp.getLong("svc_conn", 0))).append("\n");
         sb.append("آخر توقف: ").append(fmt(sp.getLong("svc_stop", 0)))
                 .append(" (").append(sp.getString("svc_reason", "—")).append(")\n");
-        sb.append("عدد الأزرار المستلمة: ").append(sp.getInt("svc_keys", 0)).append("\n");
-        sb.append("آخر زر: ").append(sp.getString("svc_lastkey", "—"))
-                .append("  ").append(fmt(sp.getLong("svc_lastkey_t", 0)));
+        sb.append("عدد ضغطات CH: ").append(sp.getInt("svc_keys", 0)).append("\n");
+        sb.append("آخر ضغطة CH: ").append(fmt(sp.getLong("svc_lastkey_t", 0))).append("\n");
+        sb.append("مرات تشغيل الواجهة من الصفر: ").append(sp.getInt("proc_starts", 0)).append("\n");
+        sb.append("آخر تشغيل من الصفر: ").append(fmt(sp.getLong("proc_start_t", 0)));
         new AlertDialog.Builder(this)
                 .setTitle("حالة الخدمة")
                 .setMessage(sb.toString())
@@ -1014,28 +1098,84 @@ public class MainActivity extends Activity {
                 .show();
     }
 
-    void learnWifiKey() {
+    void updateSpeed() {
+        long[] net = BrightnessService.readNet();
+        long rx = net[0], tx = net[1];
+        long now = System.nanoTime();
+        if (rx < 0) {
+            speedDown.setText("↓ غير متاح");
+            speedUp.setText("");
+            return;
+        }
+        if (lastT != 0) {
+            double dt = (now - lastT) / 1e9;
+            if (dt > 0) {
+                long dr = (long) ((rx - lastRx) / dt);
+                long du = (long) ((tx - lastTx) / dt);
+                speedDown.setText("↓ " + BrightnessService.fmtSpeed(dr));
+                speedUp.setText("↑ " + BrightnessService.fmtSpeed(du));
+            }
+        }
+        lastRx = rx;
+        lastTx = tx;
+        lastT = now;
+    }
+
+    void speedTest() {
+        Toast.makeText(this, "جارٍ قياس السرعة...", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            double mbps = -1;
+            try {
+                HttpURLConnection c = (HttpURLConnection) new URL(
+                        "https://speed.cloudflare.com/__down?bytes=15000000").openConnection();
+                c.setConnectTimeout(8000);
+                c.setReadTimeout(8000);
+                InputStream in = c.getInputStream();
+                byte[] buf = new byte[65536];
+                long total = 0;
+                long t0 = System.nanoTime();
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    total += n;
+                    if (System.nanoTime() - t0 > 8000000000L) break;
+                }
+                double sec = (System.nanoTime() - t0) / 1e9;
+                in.close();
+                if (sec > 0) mbps = total * 8 / sec / 1e6;
+            } catch (Exception ignored) { }
+            final double r = mbps;
+            runOnUiThread(() -> new AlertDialog.Builder(this)
+                    .setTitle("سرعة الإنترنت")
+                    .setMessage(r < 0 ? "تعذر القياس. تأكد من الاتصال."
+                            : String.format(Locale.US, "التحميل: %.1f ميغابت/ث", r))
+                    .setPositiveButton("حسناً", null)
+                    .show());
+        }).start();
+    }
+
+    void learnKey(final String which, String title) {
         if (!svcEnabled()) {
             Toast.makeText(this, "فعّل أزرار CH أولاً من إمكانية الوصول، فالزر يعمل عبرها", Toast.LENGTH_LONG).show();
             openAccessibility();
             return;
         }
-        sp.edit().putBoolean("learn_key", true).apply();
+        final String prefKey = "wifi".equals(which) ? "wifi_key" : "speed_key";
+        sp.edit().putString("learn_key", which).apply();
         final AlertDialog dlg = new AlertDialog.Builder(this)
-                .setTitle("زر الواي فاي")
-                .setMessage("اضغط الآن على الزر الذي تريده في الريموت.\n(لا يصلح زر الرجوع أو الرئيسية أو الموافق)")
+                .setTitle(title)
+                .setMessage("اضغط الآن على الزر الذي تريده في الريموت.\n(لا يصلح الرجوع ولا الرئيسية ولا الموافق ولا الأسهم ولا CH)")
                 .setNegativeButton("إلغاء", null)
-                .setNeutralButton("حذف الزر المحفوظ", (d2, w) -> sp.edit().remove("wifi_key").apply())
-                .setOnDismissListener(d3 -> sp.edit().putBoolean("learn_key", false).apply())
+                .setNeutralButton("حذف الزر المحفوظ", (d2, w) -> sp.edit().remove(prefKey).apply())
+                .setOnDismissListener(d3 -> sp.edit().remove("learn_key").apply())
                 .show();
         h.postDelayed(new Runnable() {
             @Override
             public void run() {
                 if (!dlg.isShowing()) return;
-                if (!sp.getBoolean("learn_key", false)) {
+                if (sp.getString("learn_key", "").isEmpty()) {
                     dlg.dismiss();
                     Toast.makeText(MainActivity.this, "تم تعيين الزر: "
-                            + KeyEvent.keyCodeToString(sp.getInt("wifi_key", 0)), Toast.LENGTH_LONG).show();
+                            + KeyEvent.keyCodeToString(sp.getInt(prefKey, 0)), Toast.LENGTH_LONG).show();
                 } else {
                     h.postDelayed(this, 400);
                 }
@@ -1054,6 +1194,9 @@ public class MainActivity extends Activity {
             "⌨️  أزرار CH للسطوع: " + (svcEnabled() ? "مفعّلة ✅" : "غير مفعّلة ❌"),
             "📋  حالة خدمة الأزرار",
             "📶  تعيين زر الواي فاي في الريموت",
+            "⚡  تعيين زر سرعة الإنترنت في الريموت",
+            "🚀  اختبار سرعة الإنترنت",
+            "🔒  إبقاء الواجهة نشطة: " + (sp.getBoolean("keep", true) ? "مفعّل" : "معطّل"),
             "🏠  تعيين كواجهة افتراضية",
             "🔎  إعداد زر المصدر"};
         new AlertDialog.Builder(this)
@@ -1079,8 +1222,18 @@ public class MainActivity extends Activity {
                     } else if (which == 7) {
                         showServiceStatus();
                     } else if (which == 8) {
-                        learnWifiKey();
+                        learnKey("wifi", "زر الواي فاي");
                     } else if (which == 9) {
+                        learnKey("speed", "زر سرعة الإنترنت");
+                    } else if (which == 10) {
+                        speedTest();
+                    } else if (which == 11) {
+                        boolean on = !sp.getBoolean("keep", true);
+                        sp.edit().putBoolean("keep", on).apply();
+                        if (on) startKeepAlive();
+                        else stopService(new Intent(this, KeepAliveService.class));
+                        Toast.makeText(this, on ? "تم التفعيل" : "تم التعطيل", Toast.LENGTH_SHORT).show();
+                    } else if (which == 12) {
                         openHomeSettings();
                     } else {
                         openSourceMenu();
@@ -1355,6 +1508,11 @@ public class MainActivity extends Activity {
         for (int i = 5; i < 10; i++) {
             bottomRow.addView(tile(i, false, wB, hB), cellLp(wB, hB, m));
         }
+        built = true;
+        restoreFocus();
+    }
+
+    void restoreFocus() {
         final int fi = lastFocus >= 0 ? lastFocus : 0;
         midRow.post(() -> {
             View ft = tiles[fi];
@@ -1654,16 +1812,18 @@ public class MainActivity extends Activity {
         });
     }
 
+    /** نفس طريقة المشغّلات الأصلية: يرجع التطبيق إلى الأمام إن كان يعمل بدل أن يبدأ من جديد */
     void launch(String pkg) {
         Intent li = null;
         if (pkg != null) {
             PackageManager pm = getPackageManager();
-            li = pm.getLeanbackLaunchIntentForPackage(pkg);
-            if (li == null) li = pm.getLaunchIntentForPackage(pkg);
+            li = pm.getLaunchIntentForPackage(pkg);
+            if (li == null) li = pm.getLeanbackLaunchIntentForPackage(pkg);
         }
         if (li == null) {
             Toast.makeText(this, "التطبيق غير متاح", Toast.LENGTH_SHORT).show();
         } else {
+            li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
             startActivity(li);
         }
     }
