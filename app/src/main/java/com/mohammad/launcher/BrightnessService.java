@@ -11,12 +11,14 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.RectF;
-import android.graphics.drawable.GradientDrawable;
 import android.net.TrafficStats;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.style.RelativeSizeSpan;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -27,9 +29,12 @@ import android.widget.Toast;
 
 import java.util.Locale;
 
-/** خدمة الأزرار: CH للسطوع، وزر للواي فاي، وزر لسرعة الإنترنت. أي زر آخر يمر دون معالجة. */
+/** خدمة الأزرار: CH للسطوع، وزر للواي فاي، ومقياس سرعة اختياري فوق كل التطبيقات. أي زر آخر يمر دون معالجة. */
 public class BrightnessService extends AccessibilityService
         implements SharedPreferences.OnSharedPreferenceChangeListener {
+
+    /** نسخة الخدمة العاملة، ليستعملها زر إطفاء الشاشة في الواجهة */
+    public static BrightnessService instance;
 
     /** يرفع خطوة واحدة (5) أو ينزل خطوة، ويثبّت الرقم على مضاعفات الخمسة */
     public static int snap(int cur, int dir) {
@@ -37,10 +42,13 @@ public class BrightnessService extends AccessibilityService
         return Math.max(0, ((cur + 4) / 5 - 1) * 5);
     }
 
-    public static String fmtSpeed(long bps) {
+    /** الرقم والوحدة منفصلين: مثل مقياس السرعة في هواتف شاومي */
+    public static String[] speedParts(long bps) {
         if (bps < 0) bps = 0;
-        if (bps >= 1048576L) return String.format(Locale.US, "%.1f MB/s", bps / 1048576.0);
-        return String.format(Locale.US, "%d KB/s", bps / 1024L);
+        if (bps >= 1048576L) {
+            return new String[]{String.format(Locale.US, "%.1f", bps / 1048576.0), "MB/s"};
+        }
+        return new String[]{String.valueOf(bps / 1024L), "KB/s"};
     }
 
     /** إجمالي البايتات المستلمة والمرسلة: من TrafficStats، وإن لم تدعمها الشاشة فمن /proc/net/dev */
@@ -112,25 +120,18 @@ public class BrightnessService extends AccessibilityService
     BarView bar;
     TextView speedView;
     boolean speedShowing = false;
-    long lastRx = 0, lastTx = 0, lastT = 0;
+    long lastRx = 0, lastT = 0;
     BroadcastReceiver screenReceiver;
     int cur = 100;
     int keys = 0;
     int lastApplied = -1;
     int wifiKey = 0;
-    int speedKey = 0;
     String learning = "";
     final Handler handler = new Handler(Looper.getMainLooper());
     final Runnable hideBar = new Runnable() {
         @Override
         public void run() {
             removeBar();
-        }
-    };
-    final Runnable hideSpeedRun = new Runnable() {
-        @Override
-        public void run() {
-            hideSpeed();
         }
     };
     final Runnable speedTick = new Runnable() {
@@ -150,12 +151,12 @@ public class BrightnessService extends AccessibilityService
     protected void onServiceConnected() {
         super.onServiceConnected();
         try {
+            instance = this;
             sp = getSharedPreferences("launcher", MODE_PRIVATE);
             wm = (WindowManager) getSystemService(WINDOW_SERVICE);
             cur = sp.getInt("bright", 100);
             keys = sp.getInt("svc_keys", 0);
             wifiKey = sp.getInt("wifi_key", 0);
-            speedKey = sp.getInt("speed_key", 0);
             learning = sp.getString("learn_key", "");
             sp.registerOnSharedPreferenceChangeListener(this);
             sp.edit().putBoolean("svc_on", true).putBoolean("svc_want", true)
@@ -171,6 +172,7 @@ public class BrightnessService extends AccessibilityService
             f.addAction(Intent.ACTION_SCREEN_ON);
             registerReceiver(screenReceiver, f);
             if (sp.contains("bright")) apply(cur);
+            updateSpeedState();
         } catch (Exception ignored) { }
     }
 
@@ -191,10 +193,10 @@ public class BrightnessService extends AccessibilityService
                 if (cur != lastApplied) apply(cur);
             } else if ("wifi_key".equals(key)) {
                 wifiKey = s.getInt("wifi_key", 0);
-            } else if ("speed_key".equals(key)) {
-                speedKey = s.getInt("speed_key", 0);
             } else if ("learn_key".equals(key)) {
                 learning = s.getString("learn_key", "");
+            } else if ("speed_overlay".equals(key) || "launcher_fg".equals(key)) {
+                updateSpeedState();
             }
         } catch (Exception ignored) { }
     }
@@ -238,10 +240,8 @@ public class BrightnessService extends AccessibilityService
             if (isNavKey(k)) return false;
             try {
                 if (down) {
-                    boolean wifi = "wifi".equals(learning);
-                    sp.edit().putInt(wifi ? "wifi_key" : "speed_key", k).remove("learn_key").apply();
-                    if (wifi) wifiKey = k;
-                    else speedKey = k;
+                    sp.edit().putInt("wifi_key", k).remove("learn_key").apply();
+                    wifiKey = k;
                     learning = "";
                 }
             } catch (Exception ignored) { }
@@ -250,10 +250,6 @@ public class BrightnessService extends AccessibilityService
 
         if (wifiKey != 0 && k == wifiKey) {
             if (down && ev.getRepeatCount() == 0) openWifi();
-            return true;
-        }
-        if (speedKey != 0 && k == speedKey) {
-            if (down && ev.getRepeatCount() == 0) toggleSpeed();
             return true;
         }
         return false;
@@ -275,31 +271,30 @@ public class BrightnessService extends AccessibilityService
         }
     }
 
-    void toggleSpeed() {
-        if (speedShowing) {
-            hideSpeed();
-            return;
-        }
+    /** مقياس السرعة فوق التطبيقات: يظهر إن فعّلته وكانت الواجهة ليست في المقدمة */
+    void updateSpeedState() {
+        boolean want = sp.getBoolean("speed_overlay", false) && !sp.getBoolean("launcher_fg", false);
+        if (want && !speedShowing) showSpeed();
+        else if (!want && speedShowing) hideSpeed();
+    }
+
+    void showSpeed() {
         try {
             speedView = new TextView(this);
             speedView.setTextColor(0xFFFFFFFF);
-            speedView.setTextSize(18);
-            speedView.setPadding(dp(16), dp(10), dp(16), dp(10));
-            GradientDrawable g = new GradientDrawable();
-            g.setColor(0xE6101820);
-            g.setCornerRadius(dp(18));
-            speedView.setBackground(g);
-            speedView.setText("↓ …\n↑ …");
+            speedView.setTextSize(16);
+            speedView.setGravity(Gravity.CENTER);
+            speedView.setShadowLayer(5f, 0f, 1f, 0xCC000000);
+            speedView.setText("0\nKB/s");
             WindowManager.LayoutParams lp = overlayParams(WindowManager.LayoutParams.WRAP_CONTENT,
                     WindowManager.LayoutParams.WRAP_CONTENT);
             lp.gravity = Gravity.TOP | Gravity.RIGHT;
-            lp.x = dp(28);
-            lp.y = dp(28);
+            lp.x = dp(24);
+            lp.y = dp(16);
             wm.addView(speedView, lp);
             speedShowing = true;
             lastT = 0;
             handler.post(speedTick);
-            handler.postDelayed(hideSpeedRun, 15000);
         } catch (Exception e) {
             speedShowing = false;
         }
@@ -307,29 +302,31 @@ public class BrightnessService extends AccessibilityService
 
     void updateSpeedText() {
         long[] net = readNet();
-        long rx = net[0], tx = net[1];
+        long rx = net[0];
         long now = System.nanoTime();
         if (rx < 0) {
-            speedView.setText("السرعة غير متاحة");
+            speedView.setText("—");
             return;
         }
         if (lastT != 0) {
             double dt = (now - lastT) / 1e9;
             if (dt > 0) {
                 long dr = (long) ((rx - lastRx) / dt);
-                long du = (long) ((tx - lastTx) / dt);
-                speedView.setText("↓ " + fmtSpeed(dr) + "\n↑ " + fmtSpeed(du));
+                String[] ps = speedParts(dr);
+                String text = ps[0] + "\n" + ps[1];
+                SpannableString ss = new SpannableString(text);
+                ss.setSpan(new RelativeSizeSpan(0.6f), ps[0].length() + 1, text.length(),
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                speedView.setText(ss);
             }
         }
         lastRx = rx;
-        lastTx = tx;
         lastT = now;
     }
 
     void hideSpeed() {
         speedShowing = false;
         handler.removeCallbacks(speedTick);
-        handler.removeCallbacks(hideSpeedRun);
         try {
             if (speedView != null) {
                 wm.removeView(speedView);
@@ -413,6 +410,7 @@ public class BrightnessService extends AccessibilityService
 
     void cleanup(String reason) {
         try {
+            instance = null;
             handler.removeCallbacks(hideBar);
             removeBar();
             hideSpeed();

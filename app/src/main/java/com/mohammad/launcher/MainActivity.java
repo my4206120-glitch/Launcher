@@ -1,5 +1,6 @@
 package com.mohammad.launcher;
 
+import android.accessibilityservice.AccessibilityService;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
@@ -129,6 +130,13 @@ public class MainActivity extends Activity {
                 ar.lineTo(cx + 0.12f * s, cy);
                 ar.lineTo(cx - 0.02f * s, cy + 0.13f * s);
                 c.drawPath(ar, p);
+            } else if (type == 3) {
+                p.setStyle(Paint.Style.STROKE);
+                p.setStrokeWidth(s * 0.075f);
+                float r = s * 0.28f;
+                c.drawArc(new RectF(cx - r, cy - r + s * 0.03f, cx + r, cy + r + s * 0.03f),
+                        -50, 280, false, p);
+                c.drawLine(cx, cy - s * 0.36f, cx, cy - s * 0.04f, p);
             } else {
                 Path g = new Path();
                 int teeth = 8;
@@ -319,6 +327,8 @@ public class MainActivity extends Activity {
     long lastRx = 0, lastTx = 0, lastT = 0;
     static boolean procMarked = false;
     boolean built = false;
+    View blackout;
+    boolean blacked = false;
     Runnable speedTicker = new Runnable() {
         @Override
         public void run() {
@@ -431,19 +441,21 @@ public class MainActivity extends Activity {
         head.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
         LinearLayout speedBox = new LinearLayout(this);
         speedBox.setOrientation(LinearLayout.VERTICAL);
-        speedBox.setGravity(Gravity.RIGHT);
+        speedBox.setGravity(Gravity.CENTER);
         speedDown = new TextView(this);
-        speedDown.setTextSize(16);
-        speedDown.setText("↓ 0 KB/s");
-        speedDown.setGravity(Gravity.RIGHT);
+        speedDown.setTextSize(18);
+        speedDown.setTypeface(Typeface.DEFAULT_BOLD);
+        speedDown.setText("0");
+        speedDown.setGravity(Gravity.CENTER);
         speedUp = new TextView(this);
-        speedUp.setTextSize(13);
-        speedUp.setAlpha(0.7f);
-        speedUp.setText("↑ 0 KB/s");
-        speedUp.setGravity(Gravity.RIGHT);
+        speedUp.setTextSize(10);
+        speedUp.setAlpha(0.75f);
+        speedUp.setText("KB/s");
+        speedUp.setGravity(Gravity.CENTER);
         speedBox.addView(speedDown);
         speedBox.addView(speedUp);
         head.addView(speedBox);
+        head.addView(iconBtn(3, v -> screenOff()), iconLp());
         root.addView(head, new LinearLayout.LayoutParams(-1, dp(76)));
 
         LinearLayout body = new LinearLayout(this);
@@ -469,12 +481,20 @@ public class MainActivity extends Activity {
         blp.bottomMargin = dp(60);
         frame.addView(bar, blp);
 
+        blackout = new View(this);
+        blackout.setBackgroundColor(Color.BLACK);
+        blackout.setVisibility(View.GONE);
+        blackout.setClickable(true);
+        blackout.setOnClickListener(v -> hideBlackout());
+        frame.addView(blackout, new FrameLayout.LayoutParams(-1, -1));
+
         setContentView(frame);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        sp.edit().putBoolean("launcher_fg", true).apply();
         applyLook();
         if (!built) build();
         else restoreFocus();
@@ -493,6 +513,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        sp.edit().putBoolean("launcher_fg", false).apply();
+        if (blacked) hideBlackout();
         h.removeCallbacks(ticker);
         h.removeCallbacks(speedTicker);
     }
@@ -503,6 +525,44 @@ public class MainActivity extends Activity {
         super.onStop();
         bgView.setImageDrawable(null);
         loadedKey = null;
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent e) {
+        if (blacked) {
+            if (e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() == 0) hideBlackout();
+            return true;
+        }
+        return super.dispatchKeyEvent(e);
+    }
+
+    /** يحاول إطفاء الشاشة فعلياً عبر الخدمة، ثم يُظلم الشاشة تماماً داخل الواجهة كضمان */
+    void screenOff() {
+        try {
+            if (Build.VERSION.SDK_INT >= 28 && BrightnessService.instance != null) {
+                BrightnessService.instance.performGlobalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN);
+            }
+        } catch (Exception ignored) { }
+        showBlackout();
+    }
+
+    void showBlackout() {
+        blacked = true;
+        blackout.setVisibility(View.VISIBLE);
+        blackout.requestFocus();
+        WindowManager.LayoutParams lp = getWindow().getAttributes();
+        lp.screenBrightness = 0.01f;
+        getWindow().setAttributes(lp);
+    }
+
+    void hideBlackout() {
+        blacked = false;
+        blackout.setVisibility(View.GONE);
+        WindowManager.LayoutParams lp = getWindow().getAttributes();
+        lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+        getWindow().setAttributes(lp);
+        if (sp.contains("bright")) applyBrightness(sp.getInt("bright", 100));
+        restoreFocus();
     }
 
     void startKeepAlive() {
@@ -1100,54 +1160,75 @@ public class MainActivity extends Activity {
 
     void updateSpeed() {
         long[] net = BrightnessService.readNet();
-        long rx = net[0], tx = net[1];
+        long rx = net[0];
         long now = System.nanoTime();
         if (rx < 0) {
-            speedDown.setText("↓ غير متاح");
-            speedUp.setText("");
+            speedDown.setText("—");
+            speedUp.setText("غير متاح");
             return;
         }
         if (lastT != 0) {
             double dt = (now - lastT) / 1e9;
             if (dt > 0) {
                 long dr = (long) ((rx - lastRx) / dt);
-                long du = (long) ((tx - lastTx) / dt);
-                speedDown.setText("↓ " + BrightnessService.fmtSpeed(dr));
-                speedUp.setText("↑ " + BrightnessService.fmtSpeed(du));
+                String[] ps = BrightnessService.speedParts(dr);
+                speedDown.setText(ps[0]);
+                speedUp.setText(ps[1]);
             }
         }
         lastRx = rx;
-        lastTx = tx;
         lastT = now;
     }
 
     void speedTest() {
         Toast.makeText(this, "جارٍ قياس السرعة...", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
+            String[] urls = {
+                "https://speed.cloudflare.com/__down?bytes=25000000",
+                "https://proof.ovh.net/files/10Mb.dat",
+                "https://speedtest.tele2.net/10MB.zip",
+                "https://speed.hetzner.de/10MB.bin"};
             double mbps = -1;
-            try {
-                HttpURLConnection c = (HttpURLConnection) new URL(
-                        "https://speed.cloudflare.com/__down?bytes=15000000").openConnection();
-                c.setConnectTimeout(8000);
-                c.setReadTimeout(8000);
-                InputStream in = c.getInputStream();
-                byte[] buf = new byte[65536];
-                long total = 0;
-                long t0 = System.nanoTime();
-                int n;
-                while ((n = in.read(buf)) > 0) {
-                    total += n;
-                    if (System.nanoTime() - t0 > 8000000000L) break;
+            String err = "";
+            for (String u : urls) {
+                try {
+                    HttpURLConnection c = (HttpURLConnection) new URL(u).openConnection();
+                    c.setConnectTimeout(6000);
+                    c.setReadTimeout(8000);
+                    c.setRequestProperty("User-Agent",
+                            "Mozilla/5.0 (Linux; Android 9) AppleWebKit/537.36 Chrome/110 Safari/537.36");
+                    int code = c.getResponseCode();
+                    if (code != 200) {
+                        err = "HTTP " + code;
+                        continue;
+                    }
+                    InputStream in = c.getInputStream();
+                    byte[] buf = new byte[65536];
+                    long total = 0;
+                    long t0 = System.nanoTime();
+                    int n;
+                    while ((n = in.read(buf)) > 0) {
+                        total += n;
+                        if (System.nanoTime() - t0 > 7000000000L) break;
+                    }
+                    double sec = (System.nanoTime() - t0) / 1e9;
+                    in.close();
+                    c.disconnect();
+                    if (sec > 0 && total > 200000) {
+                        mbps = total * 8 / sec / 1e6;
+                        break;
+                    }
+                    err = "قليل البيانات";
+                } catch (Exception e) {
+                    err = e.getClass().getSimpleName();
                 }
-                double sec = (System.nanoTime() - t0) / 1e9;
-                in.close();
-                if (sec > 0) mbps = total * 8 / sec / 1e6;
-            } catch (Exception ignored) { }
+            }
             final double r = mbps;
+            final String er = err;
             runOnUiThread(() -> new AlertDialog.Builder(this)
                     .setTitle("سرعة الإنترنت")
-                    .setMessage(r < 0 ? "تعذر القياس. تأكد من الاتصال."
-                            : String.format(Locale.US, "التحميل: %.1f ميغابت/ث", r))
+                    .setMessage(r < 0 ? "تعذر القياس.\nالسبب: " + er
+                            : String.format(Locale.US, "التحميل: %.1f ميغابت/ث\n(نحو %.1f ميغابايت/ث)", r, r / 8))
                     .setPositiveButton("حسناً", null)
                     .show());
         }).start();
@@ -1194,8 +1275,8 @@ public class MainActivity extends Activity {
             "⌨️  أزرار CH للسطوع: " + (svcEnabled() ? "مفعّلة ✅" : "غير مفعّلة ❌"),
             "📋  حالة خدمة الأزرار",
             "📶  تعيين زر الواي فاي في الريموت",
-            "⚡  تعيين زر سرعة الإنترنت في الريموت",
             "🚀  اختبار سرعة الإنترنت",
+            "🌐  السرعة فوق كل التطبيقات: " + (sp.getBoolean("speed_overlay", false) ? "مفعّلة" : "معطّلة"),
             "🔒  إبقاء الواجهة نشطة: " + (sp.getBoolean("keep", true) ? "مفعّل" : "معطّل"),
             "🏠  تعيين كواجهة افتراضية",
             "🔎  إعداد زر المصدر"};
@@ -1224,9 +1305,16 @@ public class MainActivity extends Activity {
                     } else if (which == 8) {
                         learnKey("wifi", "زر الواي فاي");
                     } else if (which == 9) {
-                        learnKey("speed", "زر سرعة الإنترنت");
-                    } else if (which == 10) {
                         speedTest();
+                    } else if (which == 10) {
+                        boolean on = !sp.getBoolean("speed_overlay", false);
+                        if (on && !svcEnabled()) {
+                            Toast.makeText(this, "فعّل أزرار CH أولاً من إمكانية الوصول، فالمقياس يعمل عبرها", Toast.LENGTH_LONG).show();
+                            openAccessibility();
+                        } else {
+                            sp.edit().putBoolean("speed_overlay", on).apply();
+                            Toast.makeText(this, on ? "يظهر المقياس فوق التطبيقات الأخرى" : "تم الإيقاف", Toast.LENGTH_SHORT).show();
+                        }
                     } else if (which == 11) {
                         boolean on = !sp.getBoolean("keep", true);
                         sp.edit().putBoolean("keep", on).apply();
