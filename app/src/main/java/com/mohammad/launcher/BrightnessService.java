@@ -24,6 +24,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -127,6 +128,7 @@ public class BrightnessService extends AccessibilityService
     int lastApplied = -1;
     int wifiKey = 0;
     String learning = "";
+    RelayClient relay;
     final Handler handler = new Handler(Looper.getMainLooper());
     final Runnable hideBar = new Runnable() {
         @Override
@@ -173,6 +175,8 @@ public class BrightnessService extends AccessibilityService
             registerReceiver(screenReceiver, f);
             if (sp.contains("bright")) apply(cur);
             updateSpeedState();
+            relay = new RelayClient(this);
+            relay.start();
         } catch (Exception ignored) { }
     }
 
@@ -253,6 +257,35 @@ public class BrightnessService extends AccessibilityService
             return true;
         }
         return false;
+    }
+
+    /** أوامر الريموت الواردة من الهاتف عبر الخادم */
+    public void performRemoteKey(String key) {
+        try {
+            if ("OK".equals(key)) {
+                clickFocused();
+            } else if ("BACK".equals(key)) {
+                performGlobalAction(GLOBAL_ACTION_BACK);
+            } else if ("HOME".equals(key)) {
+                performGlobalAction(GLOBAL_ACTION_HOME);
+            } else if ("CH_UP".equals(key) || "CH_DOWN".equals(key)) {
+                if (sp == null) return;
+                int lvl = snap(cur, "CH_UP".equals(key) ? 1 : -1);
+                cur = lvl;
+                sp.edit().putInt("bright", lvl).apply();
+                apply(lvl);
+                showBar(lvl);
+            }
+        } catch (Exception ignored) { }
+    }
+
+    /** ينفّذ الضغط على العنصر المحدَّد حالياً في الشاشة (مثل زر OK) */
+    void clickFocused() {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return;
+        AccessibilityNodeInfo f = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
+        if (f == null) f = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY);
+        if (f != null) f.performAction(AccessibilityNodeInfo.ACTION_CLICK);
     }
 
     void openWifi() {
@@ -411,6 +444,7 @@ public class BrightnessService extends AccessibilityService
     void cleanup(String reason) {
         try {
             instance = null;
+            if (relay != null) relay.stop();
             handler.removeCallbacks(hideBar);
             removeBar();
             hideSpeed();
