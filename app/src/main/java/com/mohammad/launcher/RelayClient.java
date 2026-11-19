@@ -17,7 +17,7 @@ import okhttp3.WebSocketListener;
 /** يبقي الشاشة متصلة بخادم الوسيط، وينفّذ الأوامر التي يرسلها الهاتف */
 public class RelayClient {
     // ضع كلمة السر من Render داخل علامتي التنصيص، ولا تنشر هذا الملف لأحد
-    static final String TOKEN = "PUT_TOKEN_HERE";
+    static final String TOKEN = "mohammad7yaser2005";
     static final String SERVER = "wss://remote-relay-p7s8.onrender.com/";
 
     private final BrightnessService svc;
