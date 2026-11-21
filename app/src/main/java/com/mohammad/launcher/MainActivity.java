@@ -69,6 +69,9 @@ import java.util.List;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
+    /** الواجهة الظاهرة حالياً، لتستقبل أوامر الريموت من الخدمة */
+    static MainActivity current;
+
     static final int REQ_IMG = 101;
     static final int[][] PD = {
         {0xFF0F2A33, 0xFF1D4B52}, {0xFF1B1035, 0xFF3B2A6B}, {0xFF2A1210, 0xFF5C2A1E},
@@ -494,6 +497,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        current = this;
         sp.edit().putBoolean("launcher_fg", true).apply();
         applyLook();
         if (!built) build();
@@ -510,9 +514,18 @@ public class MainActivity extends Activity {
         if (sp.getBoolean("keep", true)) startKeepAlive();
     }
 
+    /** يرسل ضغطة مفتاح داخل الواجهة نفسها: الأسهم تنقل التركيز و OK يفتح التطبيق المحدد */
+    void injectKey(int keyCode) {
+        if (getCurrentFocus() == null && tiles[0] != null) tiles[0].requestFocus();
+        long t = android.os.SystemClock.uptimeMillis();
+        getWindow().getDecorView().dispatchKeyEvent(new KeyEvent(t, t, KeyEvent.ACTION_DOWN, keyCode, 0));
+        getWindow().getDecorView().dispatchKeyEvent(new KeyEvent(t, t + 30, KeyEvent.ACTION_UP, keyCode, 0));
+    }
+
     @Override
     protected void onPause() {
         super.onPause();
+        if (current == this) current = null;
         sp.edit().putBoolean("launcher_fg", false).apply();
         if (blacked) hideBlackout();
         h.removeCallbacks(ticker);

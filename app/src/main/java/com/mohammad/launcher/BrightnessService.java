@@ -262,8 +262,21 @@ public class BrightnessService extends AccessibilityService
     /** أوامر الريموت الواردة من الهاتف عبر الخادم */
     public void performRemoteKey(String key) {
         try {
-            if ("OK".equals(key)) {
-                clickFocused();
+            int code = -1;
+            if ("OK".equals(key)) code = android.view.KeyEvent.KEYCODE_DPAD_CENTER;
+            else if ("UP".equals(key)) code = android.view.KeyEvent.KEYCODE_DPAD_UP;
+            else if ("DOWN".equals(key)) code = android.view.KeyEvent.KEYCODE_DPAD_DOWN;
+            else if ("LEFT".equals(key)) code = android.view.KeyEvent.KEYCODE_DPAD_LEFT;
+            else if ("RIGHT".equals(key)) code = android.view.KeyEvent.KEYCODE_DPAD_RIGHT;
+            if (code != -1) {
+                // داخل الواجهة نرسل الضغطة مباشرة، وخارجها نضغط العنصر المحدد عبر إمكانية الوصول
+                MainActivity m = MainActivity.current;
+                if (m != null) m.injectKey(code);
+                else if ("OK".equals(key)) clickFocused();
+            } else if ("MENU".equals(key)) {
+                Intent i = new Intent(android.provider.Settings.ACTION_SETTINGS);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
             } else if ("BACK".equals(key)) {
                 performGlobalAction(GLOBAL_ACTION_BACK);
             } else if ("HOME".equals(key)) {
